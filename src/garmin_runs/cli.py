@@ -270,7 +270,7 @@ def main(argv: list[str] | None = None) -> int:
 
         summary[str(aid)] = summarize(a)
 
-    write_summary(out_dir / "summary.csv")
+    write_summary(out_dir / "summary.csv", summary)
 
     print(f"Done. {len(activities)} activities, {downloaded} files written, "
           f"{skipped} already present, {failed} failed. Summary: {out_dir / 'summary.csv'}")
