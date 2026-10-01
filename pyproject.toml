@@ -1,0 +1,19 @@
+[project]
+name = "garmin-runs"
+version = "0.1.0"
+description = "Download runs from Garmin Connect as GPX/TCX files plus a summary CSV"
+readme = "README.md"
+authors = [
+    { name = "Peter Westerström", email = "peter@westerstrom.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "garminconnect>=0.3.17",
+]
+
+[project.scripts]
+garmin-runs = "garmin_runs:main"
+
+[build-system]
+requires = ["uv_build>=0.9.0,<0.10.0"]
+build-backend = "uv_build"
