@@ -292,8 +292,8 @@ def build_parser() -> argparse.ArgumentParser:
     sel.add_argument("--type", default="runs",
                      help="activity type: 'runs' (running+trail, default), 'all', "
                           "or a single type such as running, trail, cycling, swimming, ...")
-    sel.add_argument("--format", default="gpx",
-                     help="comma-separated output formats: " + ",".join(FORMATS) + " (default: gpx)")
+    sel.add_argument("--format", default="gpx,tcx",
+                     help="comma-separated output formats: " + ",".join(FORMATS) + " (default: gpx,tcx)")
 
     out = p.add_argument_group("output")
     out.add_argument("--out", default="./runs", help="output directory (default: ./runs)")

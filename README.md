@@ -37,8 +37,8 @@ uv run garmin-runs --days 30
 # Explicit range
 uv run garmin-runs --start 2026-08-01 --end 2026-08-31
 
-# Specific type + extra formats
-uv run garmin-runs --type trail --format gpx,tcx --out ./trails
+# GPX only (no TCX), specific output dir
+uv run garmin-runs --type trail --format gpx --out ./trails
 ```
 
 ### Flags
@@ -58,7 +58,8 @@ uv run garmin-runs --type trail --format gpx,tcx --out ./trails
 Files are written to `./runs/` as:
 
 ```
-YYYY-MM-DD_HHMM_<name>_<activityId>.gpx
+YYYY-MM-DD_HHMM_<name>_<activityId>.gpx   (track/map)
+YYYY-MM-DD_HHMM_<name>_<activityId>.tcx   (training data: HR, laps, ...)
 ```
 
 and `./runs/summary.csv` is (re)written each run with columns:
