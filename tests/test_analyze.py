@@ -1,13 +1,16 @@
 from argparse import Namespace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from garmin_runs.analyze import (
     Point,
     Activity,
+    activity_types,
     build_segments,
     classify,
+    filter_activities,
     filter_segments,
+    in_range,
     read_gpx,
     stats,
     write_csvs,
@@ -52,6 +55,9 @@ def args(**overrides) -> Namespace:
         gap=60,
         cadence_stats=False,
         max_pace=None,
+        min_pace=None,
+        start=None,
+        end=None,
     )
     base.update(overrides)
     return Namespace(**base)
@@ -188,9 +194,61 @@ def test_max_pace_excludes_slow_segments():
     segments = build_segments(activity(points), args())
     assert len(segments) == 2
 
-    kept, excluded = filter_segments(segments, args(max_pace=900))
-    assert excluded == 1
+    kept, slow, fast = filter_segments(segments, args(max_pace=900))
+    assert slow == 1 and fast == 0
     assert len(kept) == 1 and round(kept[0].pace_s_per_km, 1) == 714.3
 
-    kept, excluded = filter_segments(segments, args())
-    assert excluded == 0 and len(kept) == 2
+    kept, slow, fast = filter_segments(segments, args())
+    assert slow == 0 and fast == 0 and len(kept) == 2
+
+
+def test_min_pace_excludes_impossible_segments():
+    t0 = datetime(2026, 8, 7, 14, 26, 9, tzinfo=timezone.utc)
+    points = [
+        Point(t0, 0, 0, 0.0, None),
+        Point(t0 + timedelta(seconds=30), 0, 0, 42.0, 50),    # 714 s/km, walking
+        Point(t0 + timedelta(seconds=60), 0, 0, 532.0, 50),   # 61 s/km, GPS glitch
+    ]
+    segments = build_segments(activity(points), args())
+    assert len(segments) == 2
+
+    kept, slow, fast = filter_segments(segments, args(min_pace=180))
+    assert fast == 1 and slow == 0
+    assert len(kept) == 1 and round(kept[0].pace_s_per_km, 1) == 714.3
+
+
+def test_activity_types_from_summary_csv(tmp_path):
+    (tmp_path / "summary.csv").write_text(
+        "date,activity_id,name,type\n2026-08-07,1,Run,running\n2026-08-07,2,Ride,cycling\n",
+        encoding="utf-8",
+    )
+    assert activity_types(tmp_path) == {"1": "running", "2": "cycling"}
+    assert activity_types(tmp_path / "missing") == {}
+
+
+def test_type_filter_keeps_requested_types():
+    t0 = datetime(2026, 8, 7, 14, 26, 9, tzinfo=timezone.utc)
+    points = [Point(t0, 0, 0, 0.0, None)]
+    activities = [
+        Activity("1", "Run", t0.date(), points, [], "running"),
+        Activity("2", "Ride", t0.date(), points, [], "cycling"),
+        Activity("3", "Walk", t0.date(), points, [], "walking"),
+        Activity("4", "Mystery", t0.date(), points, [], ""),
+    ]
+
+    kept, skipped, unknown = filter_activities(activities, {"running", "trail", "walking"})
+    assert [a.activity_id for a in kept] == ["1", "3"]
+    assert skipped == 1 and unknown == 1
+
+    kept, skipped, unknown = filter_activities(activities, None)
+    assert len(kept) == 4 and skipped == 0 and unknown == 0
+
+
+def test_in_range_compares_dates():
+    t0 = datetime(2026, 8, 7, 14, 26, 9, tzinfo=timezone.utc)
+    act = activity([Point(t0, 0, 0, 0.0, None)])
+
+    assert in_range(act, args())
+    assert in_range(act, args(start=date(2026, 1, 1)))
+    assert not in_range(act, args(start=date(2026, 9, 1)))
+    assert not in_range(act, args(end=date(2026, 6, 30)))

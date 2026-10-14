@@ -82,6 +82,7 @@ uv run garmin-analyze --method pace --pace-threshold 9:00
 uv run garmin-analyze --window 30 --min-segment 20 --gap 60
 uv run garmin-analyze --start 2026-08-01 --end 2026-09-30 --no-csv
 uv run garmin-analyze --cadence-stats            # add cadence mean + stdev
+uv run garmin-analyze --max-pace 15:00 --min-pace 3:00 --cadence-stats   # the usual set
 ```
 
 ### How segments are classified
@@ -108,6 +109,7 @@ ignored as GPS noise.
 | --- | --- |
 | `--out` | directory of downloaded files (default `./runs`) |
 | `--start` / `--end` | restrict to a date range |
+| `--type` | activity types to analyze: `all`, or comma-separated keys (default `running,trail,walking`) |
 | `--method` | `hybrid` (default), `cadence`, `pace`, `lap` |
 | `--cadence-threshold` | strides/min at or above which a segment is a run (default 65) |
 | `--pace-threshold` | pace cutoff as `M:SS` or seconds (default `9:00`) |
@@ -115,6 +117,7 @@ ignored as GPS noise.
 | `--min-segment` / `--min-distance` | ignore segments below these (default 20 s / 3 m) |
 | `--gap` | a pause longer than this ends the segment (default 60 s) |
 | `--max-pace` | exclude segments slower than this from the stats, e.g. `15:00` (default: none) |
+| `--min-pace` | exclude segments faster than this from the stats, e.g. `3:00` (default: none) |
 | `--cadence-stats` | also report cadence mean + stdev (strides/min) |
 | `--report-dir` | where the CSVs are written (default `./runs/analysis`) |
 | `--no-csv` | print the report only |
@@ -123,26 +126,35 @@ ignored as GPS noise.
 `mean_cadence`/`stdev_cadence` to `analysis.csv`. Cadence stdev is over segments,
 so it is blank when a class has only one segment.
 
-`--max-pace` is mainly useful for the walk numbers: segments where you stood still
-are still classified as walking, and they inflate the stdev. On this data
-`--max-pace 15:00` drops 16 of 629 walk segments and brings walk stdev from 1:47
-to 1:26. Excluded segments are reported in the header and are left out of both CSVs.
+`--max-pace` and `--min-pace` guard the stats against segments that are not really
+movement. `--max-pace 15:00` drops the standing-about segments that are still
+classified as walking and inflate the walk stdev; `--min-pace 3:00` drops segments
+where the track shows 400–500 m covered in a 30 s window (50+ km/h), which is GPS
+drift or being carried rather than running. Excluded segments are reported in the
+header and are left out of both CSVs.
+
+`--type` keeps other sports out of the stats. The GPX/TCX files do not record the
+activity type, so it is read from `runs/summary.csv`; activities missing from that
+file are skipped and reported as unknown type. Without the filter, cycling segments
+(2–3 min/km) are classified as run and lift or coast time as walk, which skews both
+numbers — so `--type all` is fine for archiving, but analyze it with a filter.
 
 ### Analysis output
 
 - `runs/analysis/analysis.csv` — one row per activity × class: `date, activity_id,
-  name, class, segments, time_s, distance_km, mean_pace_s_per_km,
+  name, type, class, segments, time_s, distance_km, mean_pace_s_per_km,
   stdev_pace_s_per_km, min_pace_s_per_km, max_pace_s_per_km, share_pct`
+  (plus `mean_cadence, stdev_cadence` with `--cadence-stats`)
 - `runs/analysis/segments.csv` — one row per segment: `activity_id, date, time,
   class, pace_s_per_km, cadence, distance_m, window_s`
 
-Example (this data, with `--cadence-stats --max-pace 15:00`):
+Example (this data, with `--max-pace 15:00 --min-pace 3:00 --cadence-stats`):
 
 ```
 Overall
 class       n    time  dist km    mean     sd     min     max  share    cad     sd
-run       498 4:27:22    37.18    7:17   0:48    4:53   10:02  45.0%   77.0    4.1
-walk      613 5:26:54    31.00   10:44   1:26    5:31   14:57  55.0%   54.7    4.1
+run      1887 16:55:32   139.12    7:25   0:56    3:21   12:18  26.3%   76.7    3.7
+walk     5282 47:31:15   248.82   11:39   1:28    5:24   15:00  73.7%   53.4    5.6
 ```
 
 ## Tests

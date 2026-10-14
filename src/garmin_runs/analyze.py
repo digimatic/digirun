@@ -31,6 +31,7 @@ DEFAULT_GAP_S = 60             # a longer pause ends the current window
 DEFAULT_CADENCE_THRESHOLD = 65  # strides/min; at or above this is a run
 DEFAULT_PACE_THRESHOLD = 540    # s/km; faster than this is a run
 AMBIGUOUS_CADENCE = (61, 71)    # hybrid resolves this band with the pace threshold
+DEFAULT_TYPES = "running,trail,walking"  # activity types analyzed by default
 
 METHODS = ("hybrid", "cadence", "pace", "lap")
 
@@ -38,6 +39,7 @@ ANALYSIS_FIELDS = [
     "date",
     "activity_id",
     "name",
+    "type",
     "class",
     "segments",
     "time_s",
@@ -86,6 +88,7 @@ class Activity:
     date: date
     points: list[Point]
     laps: list[Lap]
+    type: str = ""
 
 
 @dataclass
@@ -149,6 +152,19 @@ def _activity_id(path: Path) -> str:
     """Activity id from the download filename (trailing _<id>), else the stem."""
     parts = path.stem.rsplit("_", 1)
     return parts[1] if len(parts) == 2 and parts[1].isdigit() else path.stem
+
+
+def activity_types(out_dir: Path) -> dict[str, str]:
+    """activity_id -> type key, from the summary.csv written by garmin-runs.
+
+    The GPX/TCX files themselves do not record the activity type, so summary.csv
+    is the only source. Returns {} when it is missing.
+    """
+    path = out_dir / "summary.csv"
+    if not path.is_file():
+        return {}
+    with path.open(encoding="utf-8") as f:
+        return {row["activity_id"]: row.get("type", "") for row in csv.DictReader(f)}
 
 
 def read_gpx(path: Path) -> tuple[list[Point], str]:
@@ -408,12 +424,42 @@ def method_note(args: argparse.Namespace) -> str:
     )
 
 
-def filter_segments(segments: list[Segment], args: argparse.Namespace) -> tuple[list[Segment], int]:
-    """Drop segments slower than --max-pace; returns (kept, excluded_count)."""
-    if not args.max_pace:
-        return segments, 0
-    kept = [s for s in segments if s.pace_s_per_km <= args.max_pace]
-    return kept, len(segments) - len(kept)
+def filter_activities(
+    activities: list[Activity], wanted: set[str] | None
+) -> tuple[list[Activity], int, int]:
+    """Keep activities whose type is in `wanted`; returns (kept, skipped, unknown).
+
+    Activities whose type is unknown (not in summary.csv) are skipped, since the
+    point of the filter is to keep other sports out of the stats.
+    """
+    if not wanted:
+        return activities, 0, 0
+    kept: list[Activity] = []
+    skipped = unknown = 0
+    for activity in activities:
+        if not activity.type:
+            unknown += 1
+        elif activity.type in wanted:
+            kept.append(activity)
+        else:
+            skipped += 1
+    return kept, skipped, unknown
+
+
+def filter_segments(segments: list[Segment], args: argparse.Namespace) -> tuple[list[Segment], int, int]:
+    """Drop segments outside the pace window; returns (kept, dropped_slow, dropped_fast)."""
+    if not args.max_pace and not args.min_pace:
+        return segments, 0, 0
+    kept: list[Segment] = []
+    slow = fast = 0
+    for s in segments:
+        if args.max_pace and s.pace_s_per_km > args.max_pace:
+            slow += 1
+        elif args.min_pace and s.pace_s_per_km < args.min_pace:
+            fast += 1
+        else:
+            kept.append(s)
+    return kept, slow, fast
 
 
 def _cell(value) -> str:
@@ -426,7 +472,7 @@ def print_report(
     segments: list[Segment],
     args: argparse.Namespace,
     skipped: list[str],
-    excluded: int = 0,
+    notes: list[str] = (),
 ) -> None:
     show_cad = args.cadence_stats
 
@@ -451,17 +497,15 @@ def print_report(
         f"Window: {args.window}s, min segment {args.min_segment}s / {args.min_distance}m, "
         f"gap {args.gap}s"
     )
-    if args.max_pace:
-        print(f"Max pace: slower than {fmt_pace(args.max_pace)}/km excluded ({excluded} segments)")
-    if show_cad:
-        print("Cadence columns are mean + stdev in strides/min")
+    for note in notes:
+        print(note)
     print()
 
     by_activity: dict[str, list[Segment]] = {}
     for s in segments:
         by_activity.setdefault(s.activity.activity_id, []).append(s)
 
-    header = table_header([f"{'date':<11}", f"{'activity':<34}"])
+    header = table_header([f"{'date':<11}", f"{'type':<8}", f"{'activity':<34}"])
     print(header)
     print("-" * len(header))
     for activity in activities:
@@ -472,7 +516,11 @@ def print_report(
         walk = stats([s for s in rows if s.klass == "walk"])
         print(
             " ".join(
-                [f"{activity.date.isoformat():<11}", f"{activity.name[:34]:<34}"]
+                [
+                    f"{activity.date.isoformat():<11}",
+                    f"{activity.type or '-':<8}",
+                    f"{activity.name[:34]:<34}",
+                ]
                 + cells(run)
                 + cells(walk)
             )
@@ -550,6 +598,7 @@ def write_csvs(report_dir: Path, activities: list[Activity], segments: list[Segm
                     "date": activity.date.isoformat(),
                     "activity_id": activity.activity_id,
                     "name": activity.name,
+                    "type": activity.type,
                     "class": klass,
                     "segments": st["segments"],
                     "time_s": st["time_s"],
@@ -601,6 +650,14 @@ def _parse_pace(value: str, name: str = "pace") -> int:
         raise SystemExit(f"error: invalid {name} {value!r}, expected M:SS") from e
 
 
+def _parse_date(value: str, name: str) -> date:
+    """Accept YYYY-MM-DD."""
+    try:
+        return date.fromisoformat(value)
+    except ValueError as e:
+        raise SystemExit(f"error: invalid {name} {value!r}, expected YYYY-MM-DD") from e
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="garmin-analyze",
@@ -610,6 +667,9 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--out", default=DEFAULT_OUT, help=f"directory of downloaded files (default: {DEFAULT_OUT})")
     src.add_argument("--start", metavar="YYYY-MM-DD", help="only activities from this date")
     src.add_argument("--end", metavar="YYYY-MM-DD", help="only activities up to this date")
+    src.add_argument("--type", default=DEFAULT_TYPES,
+                     help=f"activity types to analyze: 'all' or comma-separated keys "
+                          f"(default: {DEFAULT_TYPES}); types come from summary.csv")
 
     cls = p.add_argument_group("classification")
     cls.add_argument("--method", choices=METHODS, default="hybrid",
@@ -631,6 +691,9 @@ def build_parser() -> argparse.ArgumentParser:
     seg.add_argument("--max-pace", default=None, metavar="M:SS",
                      help="exclude segments slower than this from the stats, e.g. 15:00 "
                           "(useful for filtering out standing-about segments)")
+    seg.add_argument("--min-pace", default=None, metavar="M:SS",
+                     help="exclude segments faster than this from the stats, e.g. 3:00 "
+                          "(drops GPS-glitch segments no human could cover)")
 
     out = p.add_argument_group("output")
     out.add_argument("--report-dir", default=DEFAULT_REPORT_DIR,
@@ -645,6 +708,9 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     args.pace_threshold = _parse_pace(args.pace_threshold)
     args.max_pace = _parse_pace(args.max_pace, "max pace") if args.max_pace else None
+    args.min_pace = _parse_pace(args.min_pace, "min pace") if args.min_pace else None
+    args.start = _parse_date(args.start, "start date") if args.start else None
+    args.end = _parse_date(args.end, "end date") if args.end else None
 
     out_dir = Path(args.out).expanduser()
     if not out_dir.is_dir():
@@ -656,6 +722,17 @@ def main(argv: list[str] | None = None) -> int:
         print("No activities with trackpoints found.")
         return 0
 
+    wanted = None if args.type == "all" else {t.strip() for t in args.type.split(",") if t.strip()}
+    type_map = activity_types(out_dir) if wanted else {}
+    if wanted and not type_map:
+        print(f"warning: no summary.csv in {out_dir}, activity types cannot be checked", file=sys.stderr)
+    for activity in activities:
+        activity.type = type_map.get(activity.activity_id, "")
+    activities, type_skipped, type_unknown = filter_activities(activities, wanted)
+    if not activities:
+        print(f"No activities left after the --type filter ({type_skipped} skipped, {type_unknown} unknown).")
+        return 0
+
     segments: list[Segment] = []
     for activity in activities:
         if not in_range(activity, args):
@@ -665,13 +742,31 @@ def main(argv: list[str] | None = None) -> int:
         else:
             segments.extend(build_segments(activity, args))
 
-    segments, excluded = filter_segments(segments, args)
+    segments, dropped_slow, dropped_fast = filter_segments(segments, args)
 
     if not segments:
         print("No segments matched — try a smaller --window or a wider date range.")
         return 0
 
-    print_report(activities, segments, args, skipped, excluded)
+    notes = []
+    if wanted:
+        parts = []
+        if type_skipped:
+            parts.append(f"{type_skipped} skipped")
+        if type_unknown:
+            parts.append(f"{type_unknown} skipped, type unknown")
+        note = f"Types: {', '.join(sorted(wanted))}"
+        if parts:
+            note += f" ({', '.join(parts)})"
+        notes.append(note)
+    if args.max_pace:
+        notes.append(f"Max pace: slower than {fmt_pace(args.max_pace)}/km excluded ({dropped_slow} segments)")
+    if args.min_pace:
+        notes.append(f"Min pace: faster than {fmt_pace(args.min_pace)}/km excluded ({dropped_fast} segments)")
+    if args.cadence_stats:
+        notes.append("Cadence columns are mean + stdev in strides/min")
+
+    print_report(activities, segments, args, skipped, notes)
     if not args.no_csv:
         write_csvs(Path(args.report_dir).expanduser(), activities, segments, args)
     return 0
