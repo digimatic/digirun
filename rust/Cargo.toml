@@ -1,0 +1,19 @@
+[package]
+name = "garmin-analyze"
+version = "0.1.0"
+edition = "2021"
+description = "Split downloaded GPX/TCX activities into walk and run segments and report pace mean + stdev per class"
+
+[dependencies]
+quick-xml = "0.36"
+
+[profile.release]
+lto = true
+
+[lib]
+name = "garmin_analyze"
+path = "src/lib.rs"
+
+[[bin]]
+name = "garmin-analyze"
+path = "src/main.rs"

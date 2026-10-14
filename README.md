@@ -76,6 +76,11 @@ network. It splits each activity into time windows, classifies every window as
 walk or run, and reports mean pace + standard deviation per class, per activity,
 per week, and pooled overall.
 
+There is also a Rust port in `rust/` that produces the same report and the same
+CSVs (`cargo build --release`, then `rust/target/release/garmin-analyze`); it is
+what `analyze.sh` runs, and it is about seven times faster on this data — 0.16 s
+against 1.2 s for the full report. See `rust/README.md` for the differences.
+
 ```bash
 uv run garmin-analyze                                   # ./runs, method=hybrid
 uv run garmin-analyze --method pace --pace-threshold 9:00
@@ -144,7 +149,8 @@ numbers — so `--type all` is fine for archiving, but analyze it with a filter.
 goes: 255 activities take about 3.7 s single-process and 1.2 s with 8 workers. Files
 are grouped in sorted order and results are collected in that same order, so the
 report and the CSVs are identical with `--jobs 1` and `--jobs 8`. The pool is skipped
-when there are fewer than 8 activities, where it costs more than it saves.
+when there are fewer than 8 activities, where it costs more than it saves. The Rust
+port does the same work with threads, so it does not pay the process startup cost.
 
 ### Analysis output
 
@@ -168,6 +174,9 @@ walk     5282 47:31:15   248.82   11:39   1:28    5:24   15:00  73.7%   53.4    
 
 ```bash
 uv run pytest
+cd rust && cargo test     # the same suite, ported to Rust
 ```
 
-Pace values in the CSVs are seconds per kilometre, matching `summary.csv`.
+Pace values in the CSVs are seconds per kilometre, matching `summary.csv`. The Rust
+tests mirror the Python ones, and the Rust binary is checked against the Python tool
+on the real data: same report, same CSVs.

@@ -12,3 +12,6 @@ wheels/
 # Downloaded data (personal)
 runs/
 
+# Rust build output
+rust/target/
+
