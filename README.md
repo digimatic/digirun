@@ -110,6 +110,7 @@ ignored as GPS noise.
 | `--out` | directory of downloaded files (default `./runs`) |
 | `--start` / `--end` | restrict to a date range |
 | `--type` | activity types to analyze: `all`, or comma-separated keys (default `running,trail,walking`) |
+| `--jobs` | worker processes used to parse the files (default `min(cpu_count, 8)`; `1` runs single-process) |
 | `--method` | `hybrid` (default), `cadence`, `pace`, `lap` |
 | `--cadence-threshold` | strides/min at or above which a segment is a run (default 65) |
 | `--pace-threshold` | pace cutoff as `M:SS` or seconds (default `9:00`) |
@@ -138,6 +139,12 @@ activity type, so it is read from `runs/summary.csv`; activities missing from th
 file are skipped and reported as unknown type. Without the filter, cycling segments
 (2–3 min/km) are classified as run and lift or coast time as walk, which skews both
 numbers — so `--type all` is fine for archiving, but analyze it with a filter.
+
+`--jobs` parses the files in a pool of worker processes, which is where the time
+goes: 255 activities take about 3.7 s single-process and 1.2 s with 8 workers. Files
+are grouped in sorted order and results are collected in that same order, so the
+report and the CSVs are identical with `--jobs 1` and `--jobs 8`. The pool is skipped
+when there are fewer than 8 activities, where it costs more than it saves.
 
 ### Analysis output
 

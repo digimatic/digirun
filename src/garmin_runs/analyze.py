@@ -14,15 +14,20 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import os
 import sys
 from dataclasses import dataclass
 from datetime import date, datetime
+from multiprocessing import Pool
 from pathlib import Path
 from statistics import mean, stdev
 from xml.etree import ElementTree as ET
 
 DEFAULT_OUT = "./runs"
 DEFAULT_REPORT_DIR = "./runs/analysis"
+
+DEFAULT_JOBS = min(os.cpu_count() or 1, 8)   # worker processes for parsing files
+MIN_PARALLEL_FILES = 8                        # below this the pool costs more than it saves
 
 DEFAULT_WINDOW = 30            # seconds of track per segment
 DEFAULT_MIN_SEGMENT = 20       # ignore windows shorter than this
@@ -376,27 +381,52 @@ def _date_from_filename(path: Path) -> date | None:
         return None
 
 
-def load_activities(out_dir: Path) -> tuple[list[Activity], list[str]]:
-    """Group the downloaded files by activity id and read them into activities."""
+def read_group(aid: str, files: dict[str, Path]) -> Activity | None:
+    """Read one activity group into an Activity, or None when it has no points.
+
+    This runs in a worker process, so it has to stay at module level and only
+    take and return picklable values.
+    """
+    gpx_points, gpx_name = read_gpx(files[".gpx"]) if ".gpx" in files else ([], "")
+    tcx_points, tcx_laps = read_tcx(files[".tcx"]) if ".tcx" in files else ([], [])
+    # TCX is preferred: it carries Garmin's own distances, laps and speed.
+    points = tcx_points or gpx_points
+    if not points:
+        return None
+    source = files.get(".gpx") or files.get(".tcx")
+    name = gpx_name or _name_from_filename(source)
+    when = _date_from_filename(source) or points[0].time.date()
+    return Activity(aid, name, when, points, tcx_laps)
+
+
+def load_activities(out_dir: Path, jobs: int = 1) -> tuple[list[Activity], list[str]]:
+    """Group the downloaded files by activity id and read them into activities.
+
+    Groups are built in sorted order and results are collected in that same
+    order, so the result is identical with or without the pool.
+    """
     groups: dict[str, dict[str, Path]] = {}
     for path in sorted(out_dir.glob("*")):
         if path.suffix.lower() not in (".gpx", ".tcx"):
             continue
         groups.setdefault(_activity_id(path), {})[path.suffix.lower()] = path
 
+    keys = sorted(groups)
+    work = [(aid, groups[aid]) for aid in keys]
+
+    if jobs > 1 and len(work) >= MIN_PARALLEL_FILES:
+        with Pool(min(jobs, len(work))) as pool:
+            results = pool.starmap(read_group, work)
+    else:
+        results = [read_group(aid, files) for aid, files in work]
+
     activities: list[Activity] = []
     skipped: list[str] = []
-    for aid, files in sorted(groups.items()):
-        gpx_points, gpx_name = read_gpx(files[".gpx"]) if ".gpx" in files else ([], "")
-        tcx_points, tcx_laps = read_tcx(files[".tcx"]) if ".tcx" in files else ([], [])
-        # TCX is preferred: it carries Garmin's own distances, laps and speed.
-        points = tcx_points or gpx_points
-        if not points:
+    for aid, activity in zip(keys, results):
+        if activity is None:
             skipped.append(aid)
-            continue
-        name = gpx_name or _name_from_filename(files.get(".gpx") or files.get(".tcx"))
-        when = _date_from_filename(files.get(".gpx") or files.get(".tcx")) or points[0].time.date()
-        activities.append(Activity(aid, name, when, points, tcx_laps))
+        else:
+            activities.append(activity)
 
     activities.sort(key=lambda a: (a.date, a.activity_id))
     return activities, skipped
@@ -670,6 +700,9 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--type", default=DEFAULT_TYPES,
                      help=f"activity types to analyze: 'all' or comma-separated keys "
                           f"(default: {DEFAULT_TYPES}); types come from summary.csv")
+    src.add_argument("--jobs", type=int, default=DEFAULT_JOBS, metavar="N",
+                     help=f"worker processes used to parse the files (default: {DEFAULT_JOBS} "
+                          f"= min(cpu_count, 8); 1 runs single-process)")
 
     cls = p.add_argument_group("classification")
     cls.add_argument("--method", choices=METHODS, default="hybrid",
@@ -711,13 +744,14 @@ def main(argv: list[str] | None = None) -> int:
     args.min_pace = _parse_pace(args.min_pace, "min pace") if args.min_pace else None
     args.start = _parse_date(args.start, "start date") if args.start else None
     args.end = _parse_date(args.end, "end date") if args.end else None
+    args.jobs = max(1, args.jobs)
 
     out_dir = Path(args.out).expanduser()
     if not out_dir.is_dir():
         print(f"error: {out_dir} is not a directory (run garmin-runs first)", file=sys.stderr)
         return 1
 
-    activities, skipped = load_activities(out_dir)
+    activities, skipped = load_activities(out_dir, args.jobs)
     if not activities:
         print("No activities with trackpoints found.")
         return 0

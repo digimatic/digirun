@@ -11,6 +11,7 @@ from garmin_runs.analyze import (
     filter_activities,
     filter_segments,
     in_range,
+    load_activities,
     read_gpx,
     stats,
     write_csvs,
@@ -252,3 +253,16 @@ def test_in_range_compares_dates():
     assert in_range(act, args(start=date(2026, 1, 1)))
     assert not in_range(act, args(start=date(2026, 9, 1)))
     assert not in_range(act, args(end=date(2026, 6, 30)))
+
+
+def test_load_activities_is_the_same_with_and_without_the_pool(tmp_path):
+    # enough files to cross MIN_PARALLEL_FILES, so the pool path is exercised
+    for i in range(10):
+        (tmp_path / f"2026-08-07_{1000 + i}.gpx").write_text(FIXTURE, encoding="utf-8")
+
+    serial, skipped_serial = load_activities(tmp_path, jobs=1)
+    parallel, skipped_parallel = load_activities(tmp_path, jobs=4)
+
+    assert parallel == serial
+    assert skipped_parallel == skipped_serial
+    assert len(serial) == 10
