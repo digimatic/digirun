@@ -66,6 +66,8 @@ pub struct PassStats {
     pub elev_loss: Option<f64>,
     /// Metres per stride.
     pub stride_m: Option<f64>,
+    /// Seconds of sub-windows outside --max-pace/--min-pace, left out of the stats.
+    pub stopped_s: f64,
 }
 
 /// An interval between point `k - 1` and point `k`.
@@ -305,7 +307,8 @@ pub fn build_passes(activity: &Activity, args: &Args) -> Vec<Pass> {
             let start = raw.first - 1;
             let end = raw.last;
             let stats = pass_stats(points, &steps, &t, start, end, args);
-            let excluded = stats.pace.is_some_and(|pace| {
+            // Whole passes outside the guard, or with nothing left after it.
+            let excluded = stats.pace.is_none_or(|pace| {
                 args.max_pace.is_some_and(|max| pace > max as f64)
                     || args.min_pace.is_some_and(|min| pace < min as f64)
             });
@@ -352,29 +355,43 @@ fn pass_stats(
     end: usize,
     args: &Args,
 ) -> PassStats {
-    let range = start + 1..=end;
-    let counted: Vec<usize> = range.clone().filter(|&k| steps[k].dt > 0.0).collect();
-    let time: f64 = counted.iter().map(|&k| steps[k].dt).sum();
-    let distance: f64 = counted.iter().map(|&k| steps[k].dm).sum();
-
-    // Pace spread over --window sub-windows, as the segment report measures it,
-    // with the same --max-pace/--min-pace guard so standing about is left out.
+    // Cut the pass into --window sub-windows, as the segment report does. A
+    // sub-window outside --max-pace/--min-pace (standing about, GPS glitches) is
+    // left out of every stat below, the way the report drops such segments.
+    let guarded = |time: f64, distance: f64| {
+        let pace = time / (distance / 1000.0);
+        args.max_pace.is_some_and(|max| pace > max as f64)
+            || args.min_pace.is_some_and(|min| pace < min as f64)
+    };
+    let mut counted: Vec<usize> = Vec::new();
     let mut window_paces: Vec<f64> = Vec::new();
+    let mut stopped = 0.0;
+    let mut chunk: Vec<usize> = Vec::new();
     let (mut wt, mut wd) = (0.0, 0.0);
-    for &k in &counted {
+    let steps_in_pass: Vec<usize> = (start + 1..=end).filter(|&k| steps[k].dt > 0.0).collect();
+    for (n, &k) in steps_in_pass.iter().enumerate() {
+        chunk.push(k);
         wt += steps[k].dt;
         wd += steps[k].dm;
-        if wt >= args.window as f64 {
-            let pace = wt / (wd / 1000.0);
-            let guarded = args.max_pace.is_some_and(|max| pace > max as f64)
-                || args.min_pace.is_some_and(|min| pace < min as f64);
-            if wt >= args.min_segment as f64 && wd >= args.min_distance && !guarded {
-                window_paces.push(pace);
-            }
-            wt = 0.0;
-            wd = 0.0;
+        let full = wt >= args.window as f64;
+        if !full && n + 1 < steps_in_pass.len() {
+            continue;
         }
+        // The tail of the pass is judged too, once it is long enough to measure.
+        if wt >= args.min_segment as f64 && guarded(wt, wd) {
+            stopped += wt;
+        } else {
+            if full && wd >= args.min_distance {
+                window_paces.push(wt / (wd / 1000.0));
+            }
+            counted.append(&mut chunk);
+        }
+        chunk.clear();
+        wt = 0.0;
+        wd = 0.0;
     }
+    let time: f64 = counted.iter().map(|&k| steps[k].dt).sum();
+    let distance: f64 = counted.iter().map(|&k| steps[k].dm).sum();
     let (_, pace_sd, pace_min, pace_max) = if window_paces.len() > 1 {
         spread(&window_paces)
     } else {
@@ -428,6 +445,7 @@ fn pass_stats(
 
     PassStats {
         start_offset_s: t[start],
+        stopped_s: round(stopped, 1),
         time_s: round(time, 1),
         distance_m: round(distance, 1),
         pace: opt_round(pace, 1),

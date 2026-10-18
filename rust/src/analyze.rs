@@ -156,19 +156,25 @@ pub fn lap_segments(activity: &Activity, args: &Args) -> Vec<Segment> {
     segments
 }
 
-/// Mean/stdev of pace, plus cadence where the segments have it.
+/// Pace (total time / total distance) and the stdev of the segment paces, plus
+/// cadence where the segments have it.
+///
+/// The Python tool averages the segment paces instead, which reads slower: a
+/// slow segment covers less ground in the same time, so it weighs in more.
 pub fn stats(groups: &[&Segment]) -> Stats {
     let paces: Vec<f64> = groups.iter().map(|s| s.pace_s_per_km).collect();
     let cadences: Vec<f64> = groups.iter().filter_map(|s| s.cadence).collect();
+    let time: f64 = groups.iter().map(|s| s.duration_s).sum();
+    let distance: f64 = groups.iter().map(|s| s.distance_m).sum();
 
     Stats {
         segments: paces.len(),
-        time_s: round(groups.iter().map(|s| s.duration_s).sum::<f64>(), 1),
-        distance_km: round(groups.iter().map(|s| s.distance_m).sum::<f64>() / 1000.0, 2),
-        mean: if paces.is_empty() {
-            0.0
+        time_s: round(time, 1),
+        distance_km: round(distance / 1000.0, 2),
+        mean: if distance > 0.0 {
+            round(time / (distance / 1000.0), 1)
         } else {
-            round(mean(&paces), 1)
+            0.0
         },
         stdev: if paces.len() > 1 {
             round(stdev(&paces), 1)

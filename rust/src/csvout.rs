@@ -145,7 +145,7 @@ pub fn write_csvs(
     Ok(())
 }
 
-pub const PASS_FIELDS: [&str; 29] = [
+pub const PASS_FIELDS: [&str; 30] = [
     "activity_id",
     "date",
     "name",
@@ -157,6 +157,7 @@ pub const PASS_FIELDS: [&str; 29] = [
     "start_time",
     "start_offset_s",
     "time_s",
+    "stopped_s",
     "distance_m",
     "pace_s_per_km",
     "stdev_pace_s_per_km",
@@ -207,6 +208,7 @@ pub fn write_passes(
                 activity.points[p.start].time.isoformat(),
                 py_num(round(s.start_offset_s, 1)),
                 py_num(s.time_s),
+                py_num(s.stopped_s),
                 py_num(s.distance_m),
                 num(s.pace),
                 num(s.pace_sd),

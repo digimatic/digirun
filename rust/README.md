@@ -17,7 +17,7 @@ Run it from the repo root, because the default `--out` is `./runs`:
 
 ## What matches the Python tool
 
-- the report tables, both CSVs, and the `Wrote ...` line
+- the report tables, both CSVs, and the `Wrote ...` line, except the mean pace (below)
 - number formatting: Python's `str(float)` (`714.3`, whole numbers keep `.0`),
   `round(x, 1)` as a correctly rounded decimal (half-even), pace and duration
   formatting, blank cells where Python prints `-`
@@ -57,12 +57,18 @@ Each pass shows its start, time, distance, pace (with sd/min/max over the
 `--window` sub-windows), cadence mean/sd/min/max, HR mean/min/max, HR drift (last
 third minus first third), elevation gain/loss, stride length, and the Garmin laps
 it overlaps. Each session gets per-class totals, and the whole range gets a summary.
-Passes outside `--max-pace/--min-pace` are marked `*` and left out of the totals.
+Within a pass, `--window` sub-windows outside `--max-pace/--min-pace` (standing
+about) are left out of every stat, and the `stop` column shows how long they were.
+Passes that are outside the guard as a whole are marked `*` and left out of the totals.
 `passes.csv` in `--report-dir` holds one row per pass.
 
 ## Deliberate differences
 
 - `--detail` (above) exists only here.
+- The mean pace in the tables and in `analysis.csv` (`mean_pace_s_per_km`) is
+  total time / total distance, as Garmin reports it. Python averages the segment
+  paces, which reads slower because a slow segment covers less ground in the same
+  time. The sd, min and max are still over the segment paces.
 - A file that fails to parse is reported on stderr and skipped. The Python tool
   raises and stops the whole run, so one corrupt file takes down the report.
 - `--jobs` uses threads instead of processes. The pool is skipped below 8 files,

@@ -335,9 +335,9 @@ pub fn print_detail(activities: &[(&Activity, Vec<Pass>)], args: &Args, notes: &
     }
 
     let header = format!(
-        "  {:>3} {:<6} {:>7} {:>7} {:>6} {:>6} {:>5} {:>6} {:>6} {:>5} {:>4} {:>4} {:>4} {:>4} {:>4} {:>4} {:>5} {:>5} {:>5} {:>6}  laps",
+        "  {:>3} {:<6} {:>7} {:>7} {:>6} {:>6} {:>5} {:>6} {:>6} {:>5} {:>4} {:>4} {:>4} {:>4} {:>4} {:>4} {:>5} {:>5} {:>5} {:>6} {:>5}  laps",
         "#", "class", "start", "time", "dist m", "pace", "sd", "min", "max", "cad", "sd", "min",
-        "max", "hr", "min", "max", "drift", "elev+", "elev-", "stride"
+        "max", "hr", "min", "max", "drift", "elev+", "elev-", "stride", "stop"
     );
     let mut excluded = 0usize;
     for (activity, passes) in activities {
@@ -377,7 +377,7 @@ pub fn print_detail(activities: &[(&Activity, Vec<Pass>)], args: &Args, notes: &
                 .collect::<Vec<_>>()
                 .join(",");
             println!(
-                "  {:>3} {:<6} {:>7} {:>7} {:>6} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}  {}",
+                "  {:>3} {:<6} {:>7} {:>7} {:>6} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {:>5}  {}",
                 i + 1,
                 class,
                 fmt_duration(s.start_offset_s),
@@ -398,6 +398,11 @@ pub fn print_detail(activities: &[(&Activity, Vec<Pass>)], args: &Args, notes: &
                 opt(s.elev_gain, 5, one),
                 opt(s.elev_loss, 5, one),
                 opt(s.stride_m, 6, |v| format!("{v:.2}")),
+                if s.stopped_s > 0.0 {
+                    fmt_duration(s.stopped_s)
+                } else {
+                    "-".to_string()
+                },
                 laps
             );
         }

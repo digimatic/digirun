@@ -654,3 +654,41 @@ fn detail_options_parse() {
     assert_eq!((args.min_pass, args.smooth), (30, 6));
     assert!(help().contains("--detail"));
 }
+
+#[test]
+fn stats_mean_pace_is_time_over_distance() {
+    let fast = Segment {
+        activity_id: "1".to_string(),
+        date: time(14, 26, 0).date,
+        time: time(14, 26, 30),
+        duration_s: 30.0,
+        distance_m: 100.0, // 5:00/km
+        pace_s_per_km: 300.0,
+        cadence: None,
+        class: "run",
+    };
+    let slow = Segment {
+        distance_m: 50.0, // 10:00/km
+        pace_s_per_km: 600.0,
+        ..fast.clone()
+    };
+    // 60 s over 150 m, not the 7:30 average of the two paces.
+    assert_eq!(stats(&[&fast, &slow]).mean, 400.0);
+}
+
+#[test]
+fn standing_about_inside_a_pass_is_left_out() {
+    // 60 s walking, 30 s standing at walking cadence, 60 s walking.
+    let points = track(&[(60, 54.0, 1.3), (30, 54.0, 0.05), (60, 54.0, 1.3)]);
+    let args = Args {
+        max_pace: Some(900),
+        ..Args::default()
+    };
+    let passes = build_passes(&activity(&points), &args);
+
+    assert_eq!(passes.len(), 1);
+    let s = &passes[0].stats;
+    assert_eq!((s.time_s, s.stopped_s), (120.0, 30.0));
+    assert_eq!(s.distance_m, 156.0);
+    assert!(!passes[0].excluded);
+}
