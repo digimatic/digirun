@@ -127,8 +127,25 @@ pub fn print_report(
     for note in notes {
         println!("{note}");
     }
-    println!();
 
+    // Each table starts with its own blank line, so any subset of them is spaced right.
+    if args.show.activities {
+        print_activities(activities, segments, show_cad);
+    }
+    if args.show.weekly {
+        print_weekly(segments, show_cad);
+    }
+    if args.show.overall {
+        print_overall(segments, show_cad);
+    }
+
+    if !skipped.is_empty() {
+        println!();
+        println!("Skipped (no trackpoints): {}", skipped.join(", "));
+    }
+}
+
+fn print_activities(activities: &[&Activity], segments: &[&Segment], show_cad: bool) {
     let mut by_activity: BTreeMap<&str, Vec<&Segment>> = BTreeMap::new();
     for s in segments {
         by_activity
@@ -145,6 +162,7 @@ pub fn print_report(
         ],
         show_cad,
     );
+    println!();
     println!("{header}");
     println!("{}", "-".repeat(header.chars().count()));
     for activity in activities {
@@ -185,7 +203,9 @@ pub fn print_report(
         parts.extend(cells(&walk, show_cad));
         println!("{}", parts.join(" "));
     }
+}
 
+fn print_weekly(segments: &[&Segment], show_cad: bool) {
     println!();
     println!("Weekly");
     let header = table_header(&[format!("{:<10}", "week")], show_cad);
@@ -219,7 +239,9 @@ pub fn print_report(
         parts.extend(cells(&walk, show_cad));
         println!("{}", parts.join(" "));
     }
+}
 
+fn print_overall(segments: &[&Segment], show_cad: bool) {
     println!();
     println!("Overall");
     let mut header = format!(
@@ -264,11 +286,6 @@ pub fn print_report(
             line.push_str(&format!(" {} {}", cell(st.cad_mean), cell(st.cad_stdev)));
         }
         println!("{line}");
-    }
-
-    if !skipped.is_empty() {
-        println!();
-        println!("Skipped (no trackpoints): {}", skipped.join(", "));
     }
 }
 

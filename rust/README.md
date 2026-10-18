@@ -65,6 +65,8 @@ Passes that are outside the guard as a whole are marked `*` and left out of the 
 ## Deliberate differences
 
 - `--detail` (above) exists only here.
+- `--show activities,weekly,overall` picks which report tables to print (default:
+  all). It exists only here and does not change the CSVs.
 - The mean pace in the tables and in `analysis.csv` (`mean_pace_s_per_km`) is
   total time / total distance, as Garmin reports it. Python averages the segment
   paces, which reads slower because a slow segment covers less ground in the same

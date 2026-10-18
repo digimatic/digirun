@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use garmin_analyze::analyze::{
     build_segments, classify, filter_activities, filter_segments, in_range, round, stats,
 };
-use garmin_analyze::args::{help, parse, Args, Method};
+use garmin_analyze::args::{help, parse, Args, Method, Tables};
 use garmin_analyze::csvout::write_csvs;
 use garmin_analyze::detail_args;
 use garmin_analyze::dt::{Date, DateTime};
@@ -691,4 +691,31 @@ fn standing_about_inside_a_pass_is_left_out() {
     assert_eq!((s.time_s, s.stopped_s), (120.0, 30.0));
     assert_eq!(s.distance_m, 156.0);
     assert!(!passes[0].excluded);
+}
+
+#[test]
+fn show_picks_the_report_tables() {
+    let argv = |values: &[&str]| values.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+    let args = parse(&argv(&["--show", "weekly, overall"])).expect("the option should parse");
+    assert_eq!(
+        args.show,
+        Tables {
+            activities: false,
+            weekly: true,
+            overall: true,
+        }
+    );
+    assert_eq!(Args::default().show, Tables::default());
+    assert_eq!(
+        parse(&argv(&["--show=all"]))
+            .expect("all should parse")
+            .show,
+        Tables::default()
+    );
+
+    let error = parse(&argv(&["--show", "week"])).expect_err("week is not a table");
+    assert_eq!(error.code, 2);
+    assert!(error.message.contains("invalid choice: 'week'"));
+    assert!(help().contains("--show TABLES"));
 }

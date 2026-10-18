@@ -23,6 +23,25 @@ pub const DEFAULT_SMOOTH_S: i64 = 10; // rolling-median width for cadence in --d
 pub const DEFAULT_DETAIL_DAYS: i64 = 7; // --detail with no range covers this many days
 
 pub const METHODS: [&str; 4] = ["hybrid", "cadence", "pace", "lap"];
+pub const SHOW_TABLES: [&str; 4] = ["activities", "weekly", "overall", "all"];
+
+/// Which report tables to print.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tables {
+    pub activities: bool,
+    pub weekly: bool,
+    pub overall: bool,
+}
+
+impl Default for Tables {
+    fn default() -> Tables {
+        Tables {
+            activities: true,
+            weekly: true,
+            overall: true,
+        }
+    }
+}
 
 const PROG: &str = "garmin-analyze";
 const DESCRIPTION: &str =
@@ -67,6 +86,7 @@ pub struct Args {
     pub report_dir: PathBuf,
     pub cadence_stats: bool,
     pub no_csv: bool,
+    pub show: Tables,
     /// Print the per-pass report instead of the tables.
     pub detail: bool,
     /// Activity ids to show with --detail; None means all in range.
@@ -114,6 +134,7 @@ impl Default for Args {
             report_dir: PathBuf::from(DEFAULT_REPORT_DIR),
             cadence_stats: false,
             no_csv: false,
+            show: Tables::default(),
             detail: false,
             activities: None,
             min_pass: DEFAULT_MIN_PASS_S,
@@ -389,6 +410,11 @@ fn groups() -> Vec<Group> {
                     "",
                     "also report cadence mean + stdev in strides/min".to_string(),
                 ),
+                Action::new(
+                    &["--show"],
+                    "TABLES",
+                    "report tables to print: 'all' or comma-separated activities,weekly,overall (default: all)".to_string(),
+                ),
                 Action::new(&["--no-csv"], "", "print the report only".to_string()),
             ],
         },
@@ -649,6 +675,30 @@ pub fn parse(argv: &[String]) -> Result<Args, CliError> {
             "--report-dir" => args.report_dir = PathBuf::from(value(&mut i)?),
             "--cadence-stats" => args.cadence_stats = true,
             "--no-csv" => args.no_csv = true,
+            "--show" => {
+                let raw = value(&mut i)?;
+                let mut show = Tables {
+                    activities: false,
+                    weekly: false,
+                    overall: false,
+                };
+                for name in raw.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+                    match name {
+                        "activities" => show.activities = true,
+                        "weekly" => show.weekly = true,
+                        "overall" => show.overall = true,
+                        "all" => show = Tables::default(),
+                        _ => {
+                            return Err(CliError::argument(format!(
+                                "argument --show: invalid choice: {} (choose from {})",
+                                quoted(name),
+                                SHOW_TABLES.join(", ")
+                            )))
+                        }
+                    }
+                }
+                args.show = show;
+            }
             "--detail" => args.detail = true,
             "--activity" => {
                 let set: std::collections::BTreeSet<String> = value(&mut i)?
