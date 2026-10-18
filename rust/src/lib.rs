@@ -75,20 +75,62 @@ pub fn run(args: &Args) -> i32 {
         return 0;
     }
 
-    if args.detail {
-        return run_detail(&kept, args, &out_dir);
-    }
+    // --activity narrows every table; the date range is applied per table below.
+    let kept: Vec<&Activity> = kept
+        .into_iter()
+        .filter(|a| {
+            args.activities
+                .as_ref()
+                .is_none_or(|ids| ids.contains(&a.activity_id))
+        })
+        .collect();
 
-    let segments = collect_segments(&kept, args);
+    let mut segments: Vec<Segment> = Vec::new();
+    let (mut dropped_slow, mut dropped_fast) = (0, 0);
+    let mut kept_segments: Vec<&Segment> = Vec::new();
+    if args.show.segments() {
+        segments = collect_segments(&kept, args);
+    }
     let seg_refs: Vec<&Segment> = segments.iter().collect();
-    let (kept_segments, dropped_slow, dropped_fast) = analyze::filter_segments(&seg_refs, args);
-
-    if kept_segments.is_empty() {
-        println!("No segments matched — try a smaller --window or a wider date range.");
-        return 0;
+    if args.show.segments() {
+        (kept_segments, dropped_slow, dropped_fast) = analyze::filter_segments(&seg_refs, args);
+        if kept_segments.is_empty() {
+            println!("No segments matched — try a smaller --window or a wider date range.");
+            if !args.show.detail {
+                return 0;
+            }
+        }
     }
+
+    let detail: Vec<(&Activity, Vec<passes::Pass>)> = if args.show.detail {
+        kept.iter()
+            .copied()
+            .filter(|a| analyze::in_range(a, args))
+            .map(|a| (a, passes::build_passes(a, args)))
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     let mut notes: Vec<String> = Vec::new();
+    let range = match (args.start, args.end) {
+        (Some(s), Some(e)) => Some(format!("{s} to {e}")),
+        (Some(s), None) => Some(format!("from {s}")),
+        (None, Some(e)) => Some(format!("up to {e}")),
+        (None, None) => None,
+    };
+    if let Some(mut range) = range {
+        if let Some(days) = args.days {
+            range.push_str(&format!(" (last {days} days)"));
+        }
+        notes.push(format!("Range: {range}"));
+    }
+    if let Some(ids) = &args.activities {
+        notes.push(format!(
+            "Activities: {}",
+            ids.iter().cloned().collect::<Vec<_>>().join(", ")
+        ));
+    }
     if let Some(wanted) = wanted {
         let types = wanted.iter().cloned().collect::<Vec<_>>().join(", ");
         let mut parts: Vec<String> = Vec::new();
@@ -105,87 +147,65 @@ pub fn run(args: &Args) -> i32 {
         notes.push(note);
     }
     if let Some(max) = args.max_pace {
-        notes.push(format!(
-            "Max pace: slower than {}/km excluded ({dropped_slow} segments)",
+        let mut note = format!(
+            "Max pace: slower than {}/km excluded",
             report::fmt_pace(max as f64)
-        ));
+        );
+        if args.show.segments() {
+            note.push_str(&format!(" ({dropped_slow} segments)"));
+        }
+        notes.push(note);
     }
     if let Some(min) = args.min_pace {
-        notes.push(format!(
-            "Min pace: faster than {}/km excluded ({dropped_fast} segments)",
+        let mut note = format!(
+            "Min pace: faster than {}/km excluded",
             report::fmt_pace(min as f64)
-        ));
+        );
+        if args.show.segments() {
+            note.push_str(&format!(" ({dropped_fast} segments)"));
+        }
+        notes.push(note);
     }
-    if args.cadence_stats {
+    if args.cadence_stats && args.show.segments() {
         notes.push("Cadence columns are mean + stdev in strides/min".to_string());
     }
-
-    report::print_report(&kept, &kept_segments, args, &loaded.skipped, &notes);
-
-    if !args.no_csv {
-        let report_dir = expanduser(&args.report_dir);
-        if let Err(error) = csvout::write_csvs(&report_dir, &kept, &kept_segments, args) {
-            eprintln!("error: {error}");
-            return 1;
-        }
-    }
-    0
-}
-
-/// The range `--detail` covers: `--start/--end` when given, all of time for
-/// `--activity`, else the last DEFAULT_DETAIL_DAYS days up to today.
-pub fn detail_args(args: &Args, today: dt::Date) -> Args {
-    let mut args = args.clone();
-    if args.start.is_none() && args.end.is_none() && args.activities.is_none() {
-        args.start = Some(today.minus_days(args::DEFAULT_DETAIL_DAYS - 1));
-    }
-    args
-}
-
-fn run_detail(activities: &[&Activity], args: &Args, out_dir: &Path) -> i32 {
-    let args = &detail_args(args, dt::Date::today());
-    let selected: Vec<(&Activity, Vec<passes::Pass>)> = activities
-        .iter()
-        .copied()
-        .filter(|a| analyze::in_range(a, args))
-        .filter(|a| {
-            args.activities
-                .as_ref()
-                .is_none_or(|ids| ids.contains(&a.activity_id))
-        })
-        .map(|a| (a, passes::build_passes(a, args)))
-        .collect();
-    if selected.is_empty() {
-        println!(
-            "No activities in {} for the selected range or --activity.",
-            out_dir.display()
-        );
-        return 0;
-    }
-
-    let mut notes: Vec<String> = Vec::new();
-    let range = match (args.start, args.end) {
-        (Some(s), Some(e)) => Some(format!("{s} to {e}")),
-        (Some(s), None) => Some(format!("from {s}")),
-        (None, Some(e)) => Some(format!("up to {e}")),
-        (None, None) => None,
-    };
-    if let Some(range) = range {
-        notes.push(format!("Range: {range}"));
-    }
-    if let Some(ids) = &args.activities {
+    if args.show.detail {
         notes.push(format!(
-            "Activities: {}",
-            ids.iter().cloned().collect::<Vec<_>>().join(", ")
+            "Passes: cadence median over {}s, passes under {}s join a neighbour",
+            args.smooth, args.min_pass
         ));
     }
-    report::print_detail(&selected, args, &notes);
+
+    report::print_header(args, &notes);
+    if !kept_segments.is_empty() {
+        report::print_report(&kept, &kept_segments, args);
+    }
+    if args.show.detail {
+        if detail.is_empty() {
+            println!();
+            println!("No activities in the selected range for the detail.");
+        } else {
+            report::print_detail(&detail);
+        }
+    }
+    if !loaded.skipped.is_empty() {
+        println!();
+        println!("Skipped (no trackpoints): {}", loaded.skipped.join(", "));
+    }
 
     if !args.no_csv {
         let report_dir = expanduser(&args.report_dir);
-        if let Err(error) = csvout::write_passes(&report_dir, &selected) {
-            eprintln!("error: {error}");
-            return 1;
+        if !kept_segments.is_empty() {
+            if let Err(error) = csvout::write_csvs(&report_dir, &kept, &kept_segments, args) {
+                eprintln!("error: {error}");
+                return 1;
+            }
+        }
+        if !detail.is_empty() {
+            if let Err(error) = csvout::write_passes(&report_dir, &detail) {
+                eprintln!("error: {error}");
+                return 1;
+            }
         }
     }
     0

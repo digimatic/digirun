@@ -29,16 +29,23 @@ Run it from the repo root, because the default `--out` is `./runs`:
 - `--help` and argument errors are laid out the way argparse does, including the
   usage wrapping and the option column width
 
-## Detail mode (Rust only)
+## Tables and range (Rust only)
 
-`--detail` lists every run and walk **pass** (one continuous stretch of running
-or walking) in each session, with its stats. With no `--start/--end/--activity`
-it covers the last 7 days, today included:
+`--show` picks the tables: `activities`, `weekly`, `overall` (the default is these
+three), `detail`, or `all`. They all cover the same range, and every table is
+narrowed by `--start/--end`, `--days N` (the last N days up to `--end` or today), and
+`--activity ID[,ID]`. Without a range, the tables cover all of time.
 
 ```bash
-./rust/target/release/garmin-analyze --max-pace 15:00 --min-pace 3:00 --detail
-./rust/target/release/garmin-analyze --detail --activity 12345678901
+./rust/target/release/garmin-analyze --max-pace 15:00 --min-pace 3:00 --show detail --days 7
+./rust/target/release/garmin-analyze --show weekly,detail --start 2026-10-01
+./rust/target/release/garmin-analyze --show detail --activity 12345678901
 ```
+
+## The detail table
+
+`detail` lists every run and walk **pass** (one continuous stretch of running or
+walking) in each session, with its stats.
 
 Passes are split on cadence, not on Garmin's laps, because a lap (a workout step
 or a 1 km auto-split) can hold both running and walking:
@@ -64,9 +71,7 @@ Passes that are outside the guard as a whole are marked `*` and left out of the 
 
 ## Deliberate differences
 
-- `--detail` (above) exists only here.
-- `--show activities,weekly,overall` picks which report tables to print (default:
-  all). It exists only here and does not change the CSVs.
+- `--show`, `--days`, `--activity` and the detail table (above) exist only here.
 - The mean pace in the tables and in `analysis.csv` (`mean_pace_s_per_km`) is
   total time / total distance, as Garmin reports it. Python averages the segment
   paces, which reads slower because a slow segment covers less ground in the same
@@ -100,7 +105,7 @@ pool: 3.75x from one worker to eight, against 2.7x for Python.
 | `src/xml.rs` | small namespace-agnostic DOM, so `_find`/`_text` behave as in Python |
 | `src/model.rs` | `Point`, `Activity`, `Segment`, haversine |
 | `src/analyze.rs` | classification, segmentation, stats, filters, `round` |
-| `src/passes.rs` | `--detail`: cadence-split passes and their stats |
+| `src/passes.rs` | the detail table: cadence-split passes and their stats |
 | `src/dt.rs` | timestamps, dates, ISO weeks |
 | `src/csv.rs` / `src/csvout.rs` | CSV writing |
 | `src/report.rs` | the console tables |

@@ -6,9 +6,8 @@ use std::path::{Path, PathBuf};
 use garmin_analyze::analyze::{
     build_segments, classify, filter_activities, filter_segments, in_range, round, stats,
 };
-use garmin_analyze::args::{help, parse, Args, Method, Tables};
+use garmin_analyze::args::{help, parse, parse_with_today, Args, Method, Tables};
 use garmin_analyze::csvout::write_csvs;
-use garmin_analyze::detail_args;
 use garmin_analyze::dt::{Date, DateTime};
 use garmin_analyze::load::{activity_types, load_activities};
 use garmin_analyze::model::{Activity, Lap, Point, Segment};
@@ -606,35 +605,39 @@ fn read_gpx_reads_hr_and_elevation() {
 }
 
 #[test]
-fn detail_defaults_to_the_last_week() {
+fn days_counts_back_from_end_or_today() {
+    let argv = |values: &[&str]| values.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     let today = Date {
         year: 2026,
         month: 1,
         day: 3,
     };
-    let args = detail_args(&Args::default(), today);
-    assert_eq!(
-        args.start,
-        Some(Date {
-            year: 2025,
-            month: 12,
-            day: 28,
-        })
-    );
-    assert_eq!(args.end, None);
 
-    // A range or an activity id keeps the dates as given.
-    let given = Args {
-        activities: Some(BTreeSet::from(["1".to_string()])),
-        ..Args::default()
-    };
-    assert_eq!(detail_args(&given, today).start, None);
+    let args = parse_with_today(&argv(&["--days", "7"]), today).expect("--days should parse");
+    assert_eq!(
+        (args.start, args.end, args.days),
+        (Date::from_iso("2025-12-28"), None, Some(7))
+    );
+    let args = parse_with_today(&argv(&["--end", "2026-10-18", "--days=7"]), today)
+        .expect("--days with --end should parse");
+    assert_eq!(args.start, Date::from_iso("2026-10-12"));
+
+    for bad in [
+        &["--days", "0"][..],
+        &["--days", "3", "--start", "2026-10-01"][..],
+    ] {
+        let error = parse_with_today(&argv(bad), today).expect_err("should be refused");
+        assert_eq!(error.code, 2);
+    }
+    // No range at all: every table covers all of time.
+    assert_eq!(parse_with_today(&[], today).expect("empty").start, None);
 }
 
 #[test]
 fn detail_options_parse() {
     let argv: Vec<String> = [
-        "--detail",
+        "--show",
+        "detail",
         "--activity",
         "1, 2",
         "--min-pass=30",
@@ -646,13 +649,15 @@ fn detail_options_parse() {
     .collect();
     let args = parse(&argv).expect("the options should parse");
 
-    assert!(args.detail);
+    assert!(args.show.detail);
+    assert!(!args.show.segments());
     assert_eq!(
         args.activities,
         Some(BTreeSet::from(["1".to_string(), "2".to_string()]))
     );
     assert_eq!((args.min_pass, args.smooth), (30, 6));
-    assert!(help().contains("--detail"));
+    // --detail was folded into --show.
+    assert_eq!(parse(&["--detail".to_string()]).expect_err("gone").code, 2);
 }
 
 #[test]
@@ -704,18 +709,22 @@ fn show_picks_the_report_tables() {
             activities: false,
             weekly: true,
             overall: true,
+            detail: false,
         }
     );
+    // The default is every table but the detail; 'all' adds it.
     assert_eq!(Args::default().show, Tables::default());
+    assert!(!Tables::default().detail && Tables::default().segments());
     assert_eq!(
         parse(&argv(&["--show=all"]))
             .expect("all should parse")
             .show,
-        Tables::default()
+        Tables::all()
     );
 
     let error = parse(&argv(&["--show", "week"])).expect_err("week is not a table");
     assert_eq!(error.code, 2);
     assert!(error.message.contains("invalid choice: 'week'"));
     assert!(help().contains("--show TABLES"));
+    assert!(help().contains("--days N"));
 }

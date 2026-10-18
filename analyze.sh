@@ -36,5 +36,5 @@ ANALYZE="${DIGIRUN_ANALYZE:-rust/target/release/garmin-analyze}"
 
 # Every run/walk pass of the last 7 days, split on cadence (rust/README.md).
 echo
-"$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 --detail \
+"$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 --show detail --days 7 \
     --type running,trail,walking

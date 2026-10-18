@@ -19,11 +19,10 @@ pub const DEFAULT_PACE_THRESHOLD: i64 = 540; // s/km; faster than this is a run
 pub const AMBIGUOUS_CADENCE: (i64, i64) = (61, 71); // hybrid resolves this band with the pace threshold
 pub const DEFAULT_TYPES: &str = "running,trail,walking";
 pub const DEFAULT_MIN_PASS_S: i64 = 20; // shorter passes are absorbed into a neighbour
-pub const DEFAULT_SMOOTH_S: i64 = 10; // rolling-median width for cadence in --detail
-pub const DEFAULT_DETAIL_DAYS: i64 = 7; // --detail with no range covers this many days
+pub const DEFAULT_SMOOTH_S: i64 = 10; // rolling-median width for cadence in the detail table
 
 pub const METHODS: [&str; 4] = ["hybrid", "cadence", "pace", "lap"];
-pub const SHOW_TABLES: [&str; 4] = ["activities", "weekly", "overall", "all"];
+pub const SHOW_TABLES: [&str; 5] = ["activities", "weekly", "overall", "detail", "all"];
 
 /// Which report tables to print.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,14 +30,41 @@ pub struct Tables {
     pub activities: bool,
     pub weekly: bool,
     pub overall: bool,
+    /// Every run/walk pass, split on cadence (src/passes.rs).
+    pub detail: bool,
 }
 
-impl Default for Tables {
-    fn default() -> Tables {
+impl Tables {
+    pub fn none() -> Tables {
+        Tables {
+            activities: false,
+            weekly: false,
+            overall: false,
+            detail: false,
+        }
+    }
+
+    pub fn all() -> Tables {
         Tables {
             activities: true,
             weekly: true,
             overall: true,
+            detail: true,
+        }
+    }
+
+    /// Any of the tables built from the --window segments.
+    pub fn segments(&self) -> bool {
+        self.activities || self.weekly || self.overall
+    }
+}
+
+impl Default for Tables {
+    /// Everything but the detail, which is long.
+    fn default() -> Tables {
+        Tables {
+            detail: false,
+            ..Tables::all()
         }
     }
 }
@@ -87,9 +113,9 @@ pub struct Args {
     pub cadence_stats: bool,
     pub no_csv: bool,
     pub show: Tables,
-    /// Print the per-pass report instead of the tables.
-    pub detail: bool,
-    /// Activity ids to show with --detail; None means all in range.
+    /// `--days N`, already resolved into `start`; kept for the report header.
+    pub days: Option<i64>,
+    /// Activity ids to analyze; None means all in range.
     pub activities: Option<std::collections::BTreeSet<String>>,
     pub min_pass: i64,
     pub smooth: i64,
@@ -135,7 +161,7 @@ impl Default for Args {
             cadence_stats: false,
             no_csv: false,
             show: Tables::default(),
-            detail: false,
+            days: None,
             activities: None,
             min_pass: DEFAULT_MIN_PASS_S,
             smooth: DEFAULT_SMOOTH_S,
@@ -285,6 +311,16 @@ fn groups() -> Vec<Group> {
                     "only activities up to this date".to_string(),
                 ),
                 Action::new(
+                    &["--days"],
+                    "N",
+                    "only the last N days, up to --end or today (not with --start)".to_string(),
+                ),
+                Action::new(
+                    &["--activity"],
+                    "ID",
+                    "only these comma-separated activity ids".to_string(),
+                ),
+                Action::new(
                     &["--type"],
                     "TYPE",
                     format!(
@@ -368,18 +404,6 @@ fn groups() -> Vec<Group> {
             title: "detail".to_string(),
             actions: vec![
                 Action::new(
-                    &["--detail"],
-                    "",
-                    format!(
-                        "list every run/walk pass, split on cadence, with its stats; the range is --start/--end, or --activity, or by default the last {DEFAULT_DETAIL_DAYS} days (e.g. --detail --start 2026-10-01)"
-                    ),
-                ),
-                Action::new(
-                    &["--activity"],
-                    "ID",
-                    "only these comma-separated activity ids".to_string(),
-                ),
-                Action::new(
                     &["--min-pass"],
                     "MIN_PASS",
                     format!(
@@ -402,7 +426,7 @@ fn groups() -> Vec<Group> {
                     &["--report-dir"],
                     "REPORT_DIR",
                     format!(
-                        "where analysis.csv and segments.csv (passes.csv with --detail) are written (default: {DEFAULT_REPORT_DIR})"
+                        "where analysis.csv and segments.csv (passes.csv with --show detail) are written (default: {DEFAULT_REPORT_DIR})"
                     ),
                 ),
                 Action::new(
@@ -413,7 +437,7 @@ fn groups() -> Vec<Group> {
                 Action::new(
                     &["--show"],
                     "TABLES",
-                    "report tables to print: 'all' or comma-separated activities,weekly,overall (default: all)".to_string(),
+                    "report tables to print: 'all' or comma-separated activities,weekly,overall,detail (default: activities,weekly,overall); detail lists every run/walk pass, split on cadence, with its stats".to_string(),
                 ),
                 Action::new(&["--no-csv"], "", "print the report only".to_string()),
             ],
@@ -539,6 +563,11 @@ pub fn help() -> String {
 
 /// Parse argv (without the program name).
 pub fn parse(argv: &[String]) -> Result<Args, CliError> {
+    parse_with_today(argv, Date::today())
+}
+
+/// `parse`, with the date `--days` counts back from when there is no `--end`.
+pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> {
     let mut args = Args::default();
     let mut i = 0;
 
@@ -677,17 +706,14 @@ pub fn parse(argv: &[String]) -> Result<Args, CliError> {
             "--no-csv" => args.no_csv = true,
             "--show" => {
                 let raw = value(&mut i)?;
-                let mut show = Tables {
-                    activities: false,
-                    weekly: false,
-                    overall: false,
-                };
+                let mut show = Tables::none();
                 for name in raw.split(',').map(str::trim).filter(|t| !t.is_empty()) {
                     match name {
                         "activities" => show.activities = true,
                         "weekly" => show.weekly = true,
                         "overall" => show.overall = true,
-                        "all" => show = Tables::default(),
+                        "detail" => show.detail = true,
+                        "all" => show = Tables::all(),
                         _ => {
                             return Err(CliError::argument(format!(
                                 "argument --show: invalid choice: {} (choose from {})",
@@ -699,7 +725,21 @@ pub fn parse(argv: &[String]) -> Result<Args, CliError> {
                 }
                 args.show = show;
             }
-            "--detail" => args.detail = true,
+            "--days" => {
+                let raw = value(&mut i)?;
+                let days = raw.parse::<i64>().map_err(|_| {
+                    CliError::argument(format!(
+                        "argument --days: invalid int value: {}",
+                        quoted(&raw)
+                    ))
+                })?;
+                if days < 1 {
+                    return Err(CliError::argument(format!(
+                        "argument --days: must be at least 1, got {days}"
+                    )));
+                }
+                args.days = Some(days);
+            }
             "--activity" => {
                 let set: std::collections::BTreeSet<String> = value(&mut i)?
                     .split(',')
@@ -736,5 +776,13 @@ pub fn parse(argv: &[String]) -> Result<Args, CliError> {
     }
 
     args.jobs = args.jobs.max(1);
+    if let Some(days) = args.days {
+        if args.start.is_some() {
+            return Err(CliError::argument(
+                "argument --days: not allowed with argument --start",
+            ));
+        }
+        args.start = Some(args.end.unwrap_or(today).minus_days(days - 1));
+    }
     Ok(args)
 }

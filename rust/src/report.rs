@@ -107,15 +107,8 @@ pub fn method_note(args: &Args) -> String {
     }
 }
 
-pub fn print_report(
-    activities: &[&Activity],
-    segments: &[&Segment],
-    args: &Args,
-    skipped: &[String],
-    notes: &[String],
-) {
-    let show_cad = args.cadence_stats;
-
+/// The method and window lines, then the notes (filters, range, ...).
+pub fn print_header(args: &Args, notes: &[String]) {
     println!("Method: {} — {}", args.method.as_str(), method_note(args));
     println!(
         "Window: {}s, min segment {}s / {}m, gap {}s",
@@ -127,6 +120,11 @@ pub fn print_report(
     for note in notes {
         println!("{note}");
     }
+}
+
+/// The tables built from the segments, as chosen with --show.
+pub fn print_report(activities: &[&Activity], segments: &[&Segment], args: &Args) {
+    let show_cad = args.cadence_stats;
 
     // Each table starts with its own blank line, so any subset of them is spaced right.
     if args.show.activities {
@@ -137,11 +135,6 @@ pub fn print_report(
     }
     if args.show.overall {
         print_overall(segments, show_cad);
-    }
-
-    if !skipped.is_empty() {
-        println!();
-        println!("Skipped (no trackpoints): {}", skipped.join(", "));
     }
 }
 
@@ -341,16 +334,8 @@ fn totals_line(label: &str, passes: &[&Pass]) -> String {
     format!("  {label:<8} {}", parts.join(" | "))
 }
 
-pub fn print_detail(activities: &[(&Activity, Vec<Pass>)], args: &Args, notes: &[String]) {
-    println!("Method: {} — {}", args.method.as_str(), method_note(args));
-    println!(
-        "Passes: cadence median over {}s, passes under {}s join a neighbour, gap {}s",
-        args.smooth, args.min_pass, args.gap
-    );
-    for note in notes {
-        println!("{note}");
-    }
-
+/// One block per session with its passes, then the range summary.
+pub fn print_detail(activities: &[(&Activity, Vec<Pass>)]) {
     let header = format!(
         "  {:>3} {:<6} {:>7} {:>7} {:>6} {:>6} {:>5} {:>6} {:>6} {:>5} {:>4} {:>4} {:>4} {:>4} {:>4} {:>4} {:>5} {:>5} {:>5} {:>6} {:>5}  laps",
         "#", "class", "start", "time", "dist m", "pace", "sd", "min", "max", "cad", "sd", "min",
