@@ -3,8 +3,10 @@
 use std::collections::BTreeMap;
 
 use crate::analyze::stats;
+use crate::analyze::{RUN, WALK};
 use crate::args::{Args, Method, AMBIGUOUS_CADENCE};
 use crate::model::{Activity, Segment, Stats};
+use crate::passes::{totals, Pass, Source};
 
 /// Python's `str(float)`: whole numbers keep the `.0`.
 pub fn py_num(value: f64) -> String {
@@ -267,6 +269,177 @@ pub fn print_report(
     if !skipped.is_empty() {
         println!();
         println!("Skipped (no trackpoints): {}", skipped.join(", "));
+    }
+}
+
+/// Right-aligned cell of `width`, or `-` when the value is missing.
+fn opt(value: Option<f64>, width: usize, show: fn(f64) -> String) -> String {
+    format!(
+        "{:>width$}",
+        value.map(show).unwrap_or_else(|| "-".to_string())
+    )
+}
+
+fn int(value: f64) -> String {
+    round_int(value).to_string()
+}
+
+fn one(value: f64) -> String {
+    format!("{value:.1}")
+}
+
+fn pace(value: f64) -> String {
+    fmt_pace(value)
+}
+
+/// One line per class: passes, time, distance, pace, cadence and HR.
+fn totals_line(label: &str, passes: &[&Pass]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for class in [RUN, WALK] {
+        let group: Vec<&Pass> = passes
+            .iter()
+            .copied()
+            .filter(|p| p.class == class && !p.excluded)
+            .collect();
+        let Some(t) = totals(&group) else {
+            continue;
+        };
+        let mut part = format!(
+            "{class}: {} passes {} {:.2} km",
+            t.passes,
+            fmt_duration(t.time_s),
+            t.distance_m / 1000.0
+        );
+        if let Some(p) = t.pace {
+            part.push_str(&format!(" {}/km", fmt_pace(p)));
+        }
+        if let Some(c) = t.cad_mean {
+            part.push_str(&format!(" cad {c:.1}"));
+        }
+        if let Some(hr) = t.hr_mean {
+            part.push_str(&format!(" hr {}", int(hr)));
+        }
+        parts.push(part);
+    }
+    format!("  {label:<8} {}", parts.join(" | "))
+}
+
+pub fn print_detail(activities: &[(&Activity, Vec<Pass>)], args: &Args, notes: &[String]) {
+    println!("Method: {} — {}", args.method.as_str(), method_note(args));
+    println!(
+        "Passes: cadence median over {}s, passes under {}s join a neighbour, gap {}s",
+        args.smooth, args.min_pass, args.gap
+    );
+    for note in notes {
+        println!("{note}");
+    }
+
+    let header = format!(
+        "  {:>3} {:<6} {:>7} {:>7} {:>6} {:>6} {:>5} {:>6} {:>6} {:>5} {:>4} {:>4} {:>4} {:>4} {:>4} {:>4} {:>5} {:>5} {:>5} {:>6}  laps",
+        "#", "class", "start", "time", "dist m", "pace", "sd", "min", "max", "cad", "sd", "min",
+        "max", "hr", "min", "max", "drift", "elev+", "elev-", "stride"
+    );
+    let mut excluded = 0usize;
+    for (activity, passes) in activities {
+        println!();
+        println!(
+            "{}  {}  {}  ({})",
+            activity.date.isoformat(),
+            if activity.r#type.is_empty() {
+                "-"
+            } else {
+                &activity.r#type
+            },
+            activity.name,
+            activity.activity_id
+        );
+        if passes.is_empty() {
+            println!("  no passes");
+            continue;
+        }
+        if passes.iter().any(|p| p.source == Source::Pace) {
+            println!("  no cadence in this activity: passes are split on pace");
+        }
+        println!("{header}");
+        println!("  {}", "-".repeat(header.chars().count() - 2));
+        for (i, p) in passes.iter().enumerate() {
+            let s = &p.stats;
+            excluded += p.excluded as usize;
+            let class = if p.excluded {
+                format!("{}*", p.class)
+            } else {
+                p.class.to_string()
+            };
+            let laps = p
+                .laps
+                .iter()
+                .map(|l| l.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            println!(
+                "  {:>3} {:<6} {:>7} {:>7} {:>6} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}  {}",
+                i + 1,
+                class,
+                fmt_duration(s.start_offset_s),
+                fmt_duration(s.time_s),
+                int(s.distance_m),
+                opt(s.pace, 6, pace),
+                opt(s.pace_sd, 5, pace),
+                opt(s.pace_min, 6, pace),
+                opt(s.pace_max, 6, pace),
+                opt(s.cad_mean, 5, one),
+                opt(s.cad_sd, 4, one),
+                opt(s.cad_min, 4, int),
+                opt(s.cad_max, 4, int),
+                opt(s.hr_mean, 4, int),
+                opt(s.hr_min, 4, int),
+                opt(s.hr_max, 4, int),
+                opt(s.hr_drift, 5, |v| format!("{:+}", round_int(v))),
+                opt(s.elev_gain, 5, one),
+                opt(s.elev_loss, 5, one),
+                opt(s.stride_m, 6, |v| format!("{v:.2}")),
+                laps
+            );
+        }
+        let refs: Vec<&Pass> = passes.iter().collect();
+        println!("{}", totals_line("Session", &refs));
+    }
+
+    let all: Vec<&Pass> = activities.iter().flat_map(|(_, p)| p.iter()).collect();
+    println!();
+    println!("Range ({} sessions)", activities.len());
+    let header = format!(
+        "{:<6} {:>6} {:>8} {:>8} {:>7} {:>6} {:>7} {:>7} {:>6} {:>5}",
+        "class", "passes", "time", "dist km", "pace", "sd", "mean", "median", "cad", "hr"
+    );
+    println!("{header}");
+    println!("{}", "-".repeat(header.chars().count()));
+    for class in [RUN, WALK] {
+        let group: Vec<&Pass> = all
+            .iter()
+            .copied()
+            .filter(|p| p.class == class && !p.excluded)
+            .collect();
+        let Some(t) = totals(&group) else {
+            continue;
+        };
+        println!(
+            "{:<6} {:>6} {:>8} {:>8.2} {} {} {:>7} {:>7} {} {}",
+            class,
+            t.passes,
+            fmt_duration(t.time_s),
+            t.distance_m / 1000.0,
+            opt(t.pace, 7, pace),
+            opt(t.pace_sd, 6, pace),
+            fmt_duration(t.mean_pass_s),
+            fmt_duration(t.median_pass_s),
+            opt(t.cad_mean, 6, one),
+            opt(t.hr_mean, 5, int)
+        );
+    }
+    if excluded > 0 {
+        println!();
+        println!("* {excluded} passes outside --max-pace/--min-pace, left out of the totals");
     }
 }
 

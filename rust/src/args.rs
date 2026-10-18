@@ -18,6 +18,9 @@ pub const DEFAULT_CADENCE_THRESHOLD: i64 = 65; // strides/min; at or above this 
 pub const DEFAULT_PACE_THRESHOLD: i64 = 540; // s/km; faster than this is a run
 pub const AMBIGUOUS_CADENCE: (i64, i64) = (61, 71); // hybrid resolves this band with the pace threshold
 pub const DEFAULT_TYPES: &str = "running,trail,walking";
+pub const DEFAULT_MIN_PASS_S: i64 = 20; // shorter passes are absorbed into a neighbour
+pub const DEFAULT_SMOOTH_S: i64 = 10; // rolling-median width for cadence in --detail
+pub const DEFAULT_DETAIL_DAYS: i64 = 7; // --detail with no range covers this many days
 
 pub const METHODS: [&str; 4] = ["hybrid", "cadence", "pace", "lap"];
 
@@ -64,6 +67,12 @@ pub struct Args {
     pub report_dir: PathBuf,
     pub cadence_stats: bool,
     pub no_csv: bool,
+    /// Print the per-pass report instead of the tables.
+    pub detail: bool,
+    /// Activity ids to show with --detail; None means all in range.
+    pub activities: Option<std::collections::BTreeSet<String>>,
+    pub min_pass: i64,
+    pub smooth: i64,
 }
 
 /// Worker processes/threads used to parse the files.
@@ -105,6 +114,10 @@ impl Default for Args {
             report_dir: PathBuf::from(DEFAULT_REPORT_DIR),
             cadence_stats: false,
             no_csv: false,
+            detail: false,
+            activities: None,
+            min_pass: DEFAULT_MIN_PASS_S,
+            smooth: DEFAULT_SMOOTH_S,
         }
     }
 }
@@ -331,13 +344,44 @@ fn groups() -> Vec<Group> {
             ],
         },
         Group {
+            title: "detail".to_string(),
+            actions: vec![
+                Action::new(
+                    &["--detail"],
+                    "",
+                    format!(
+                        "list every run/walk pass, split on cadence, with its stats; the range is --start/--end, or --activity, or by default the last {DEFAULT_DETAIL_DAYS} days (e.g. --detail --start 2026-10-01)"
+                    ),
+                ),
+                Action::new(
+                    &["--activity"],
+                    "ID",
+                    "only these comma-separated activity ids".to_string(),
+                ),
+                Action::new(
+                    &["--min-pass"],
+                    "MIN_PASS",
+                    format!(
+                        "passes shorter than this many seconds join a neighbour (default: {DEFAULT_MIN_PASS_S})"
+                    ),
+                ),
+                Action::new(
+                    &["--smooth"],
+                    "SMOOTH",
+                    format!(
+                        "seconds of rolling median applied to cadence (default: {DEFAULT_SMOOTH_S})"
+                    ),
+                ),
+            ],
+        },
+        Group {
             title: "output".to_string(),
             actions: vec![
                 Action::new(
                     &["--report-dir"],
                     "REPORT_DIR",
                     format!(
-                        "where analysis.csv and segments.csv are written (default: {DEFAULT_REPORT_DIR})"
+                        "where analysis.csv and segments.csv (passes.csv with --detail) are written (default: {DEFAULT_REPORT_DIR})"
                     ),
                 ),
                 Action::new(
@@ -605,6 +649,33 @@ pub fn parse(argv: &[String]) -> Result<Args, CliError> {
             "--report-dir" => args.report_dir = PathBuf::from(value(&mut i)?),
             "--cadence-stats" => args.cadence_stats = true,
             "--no-csv" => args.no_csv = true,
+            "--detail" => args.detail = true,
+            "--activity" => {
+                let set: std::collections::BTreeSet<String> = value(&mut i)?
+                    .split(',')
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect();
+                args.activities = if set.is_empty() { None } else { Some(set) };
+            }
+            "--min-pass" => {
+                let raw = value(&mut i)?;
+                args.min_pass = raw.parse::<i64>().map_err(|_| {
+                    CliError::argument(format!(
+                        "argument --min-pass: invalid int value: {}",
+                        quoted(&raw)
+                    ))
+                })?;
+            }
+            "--smooth" => {
+                let raw = value(&mut i)?;
+                args.smooth = raw.parse::<i64>().map_err(|_| {
+                    CliError::argument(format!(
+                        "argument --smooth: invalid int value: {}",
+                        quoted(&raw)
+                    ))
+                })?;
+            }
             other => {
                 return Err(CliError::argument(format!(
                     "unrecognized arguments: {other}"

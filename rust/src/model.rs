@@ -10,6 +10,8 @@ pub struct Point {
     /// Cumulative distance in metres (from positions in GPX, from DistanceMeters in TCX).
     pub distance_m: f64,
     pub cadence: Option<f64>,
+    pub hr: Option<f64>,
+    pub altitude: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -6,12 +6,14 @@ use std::path::{Path, PathBuf};
 use garmin_analyze::analyze::{
     build_segments, classify, filter_activities, filter_segments, in_range, round, stats,
 };
-use garmin_analyze::args::{Args, Method};
+use garmin_analyze::args::{help, parse, Args, Method};
 use garmin_analyze::csvout::write_csvs;
+use garmin_analyze::detail_args;
 use garmin_analyze::dt::{Date, DateTime};
 use garmin_analyze::load::{activity_types, load_activities};
-use garmin_analyze::model::{Activity, Point, Segment};
-use garmin_analyze::parse::read_gpx;
+use garmin_analyze::model::{Activity, Lap, Point, Segment};
+use garmin_analyze::parse::{read_gpx, read_tcx};
+use garmin_analyze::passes::{build_passes, Source};
 use garmin_analyze::xml;
 
 const FIXTURE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -70,6 +72,8 @@ fn point(seconds: i64, distance_m: f64, cadence: Option<f64>) -> Point {
         lon: 0.0,
         distance_m,
         cadence,
+        hr: None,
+        altitude: None,
     }
 }
 
@@ -422,4 +426,231 @@ fn load_activities_is_the_same_with_and_without_the_pool() {
     assert_eq!(parallel.activities, serial.activities);
     assert_eq!(parallel.skipped, serial.skipped);
     assert_eq!(serial.activities.len(), 10);
+}
+
+/// A 1 Hz track from `(seconds, cadence, metres per second)` stretches.
+fn track(stretches: &[(i64, f64, f64)]) -> Vec<Point> {
+    let mut points = vec![point(0, 0.0, None)];
+    let (mut t, mut distance) = (0, 0.0);
+    for &(seconds, cadence, speed) in stretches {
+        for _ in 0..seconds {
+            t += 1;
+            distance += speed;
+            points.push(point(t, distance, Some(cadence)));
+        }
+    }
+    points
+}
+
+fn with_one_lap(points: &[Point]) -> Activity {
+    let mut act = activity(points);
+    act.laps = vec![Lap {
+        start_index: 0,
+        end_index: points.len() - 1,
+        duration_s: (points.len() - 1) as f64,
+        distance_m: points[points.len() - 1].distance_m,
+    }];
+    act
+}
+
+#[test]
+fn passes_split_on_cadence_within_one_lap() {
+    let points = track(&[
+        (60, 54.0, 1.3),
+        (120, 78.0, 2.5),
+        (40, 54.0, 1.3),
+        (60, 78.0, 2.5),
+    ]);
+    let passes = build_passes(&with_one_lap(&points), &Args::default());
+
+    assert_eq!(
+        passes.iter().map(|p| p.class).collect::<Vec<_>>(),
+        vec!["walk", "run", "walk", "run"]
+    );
+    // The median shifts each boundary by at most half the smoothing width.
+    for (pass, want) in passes.iter().zip([60.0, 120.0, 40.0, 60.0]) {
+        assert!((pass.stats.time_s - want).abs() <= 5.0, "{pass:?}");
+        assert_eq!(pass.laps, vec![1]);
+        assert_eq!(pass.source, Source::Cadence);
+    }
+    let total: f64 = passes.iter().map(|p| p.stats.time_s).sum();
+    assert_eq!(total, 280.0);
+}
+
+#[test]
+fn cadence_inside_the_band_keeps_the_pass() {
+    // 65 is inside the 61-71 band: it stays a run even at a walking pace.
+    let points = track(&[(60, 78.0, 2.5), (60, 65.0, 1.3)]);
+    let passes = build_passes(&activity(&points), &Args::default());
+
+    assert_eq!(
+        passes.iter().map(|p| p.class).collect::<Vec<_>>(),
+        vec!["run"]
+    );
+    assert_eq!(passes[0].stats.time_s, 120.0);
+}
+
+#[test]
+fn short_passes_join_a_neighbour() {
+    let points = track(&[(60, 78.0, 2.5), (10, 54.0, 1.3), (60, 78.0, 2.5)]);
+    let args = Args {
+        smooth: 0,
+        ..Args::default()
+    };
+    let passes = build_passes(&activity(&points), &args);
+    assert_eq!(
+        passes.iter().map(|p| p.class).collect::<Vec<_>>(),
+        vec!["run"]
+    );
+    assert_eq!(passes[0].stats.time_s, 130.0);
+
+    let args = Args {
+        smooth: 0,
+        min_pass: 5,
+        ..Args::default()
+    };
+    let passes = build_passes(&activity(&points), &args);
+    assert_eq!(
+        passes.iter().map(|p| p.class).collect::<Vec<_>>(),
+        vec!["run", "walk", "run"]
+    );
+}
+
+#[test]
+fn pause_longer_than_gap_splits_the_pass() {
+    let mut points = track(&[(60, 78.0, 2.5)]);
+    let resume = track(&[(60, 78.0, 2.5)]);
+    let last = points[points.len() - 1].distance_m;
+    for p in &resume[1..] {
+        let seconds = 60 + 120 + p.time.seconds_since(&resume[0].time) as i64;
+        points.push(point(seconds, last + p.distance_m, p.cadence));
+    }
+    let passes = build_passes(&activity(&points), &Args::default());
+
+    assert_eq!(
+        passes.iter().map(|p| p.class).collect::<Vec<_>>(),
+        vec!["run", "run"]
+    );
+    // The first step after the pause spans the gap, so it is not counted.
+    assert_eq!(passes[0].stats.time_s, 60.0);
+    assert_eq!(passes[1].stats.time_s, 59.0);
+}
+
+#[test]
+fn pass_stats_cover_hr_elevation_and_stride() {
+    let mut points = track(&[(120, 80.0, 2.5)]);
+    for (i, p) in points.iter_mut().enumerate() {
+        p.hr = Some(120.0 + i as f64 / 4.0); // 120 .. 150
+        p.altitude = Some(if i <= 60 { i as f64 } else { 120.0 - i as f64 });
+    }
+    let passes = build_passes(&activity(&points), &Args::default());
+    let s = &passes[0].stats;
+
+    assert_eq!(passes.len(), 1);
+    assert_eq!(s.time_s, 120.0);
+    assert_eq!(s.distance_m, 300.0);
+    assert_eq!(s.pace, Some(400.0)); // 120 s / 0.3 km
+    assert_eq!(s.pace_sd, Some(0.0));
+    assert_eq!(
+        (s.cad_mean, s.cad_min, s.cad_max),
+        (Some(80.0), Some(80.0), Some(80.0))
+    );
+    assert_eq!((s.hr_min, s.hr_max), (Some(120.2), Some(150.0))); // 120.25, rounded
+    assert_eq!(s.hr_drift, Some(19.9)); // last 40 s (145.0) minus first 40 s (125.125)
+    assert_eq!((s.elev_gain, s.elev_loss), (Some(60.0), Some(60.0)));
+    assert_eq!(s.stride_m, Some(1.88)); // 300 m / (80 strides/min * 2 min)
+}
+
+#[test]
+fn read_tcx_reads_hr_and_altitude() {
+    let tcx = r#"<?xml version="1.0" encoding="UTF-8"?>
+<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"
+    xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2">
+  <Activities><Activity Sport="Running"><Lap StartTime="2026-08-07T14:26:00.000Z">
+    <TotalTimeSeconds>1.0</TotalTimeSeconds><DistanceMeters>3.0</DistanceMeters>
+    <Track>
+      <Trackpoint><Time>2026-08-07T14:26:00.000Z</Time><AltitudeMeters>128.5</AltitudeMeters>
+        <DistanceMeters>0.0</DistanceMeters><HeartRateBpm><Value>94</Value></HeartRateBpm>
+        <Extensions><ns3:TPX><ns3:RunCadence>54</ns3:RunCadence></ns3:TPX></Extensions></Trackpoint>
+      <Trackpoint><Time>2026-08-07T14:26:01.000Z</Time>
+        <DistanceMeters>3.0</DistanceMeters></Trackpoint>
+    </Track>
+  </Lap></Activity></Activities>
+</TrainingCenterDatabase>"#;
+    let root = xml::parse(tcx).expect("could not parse the fixture");
+    let (points, laps) = read_tcx(&root);
+
+    assert_eq!(laps.len(), 1);
+    assert_eq!(
+        (points[0].hr, points[0].altitude, points[0].cadence),
+        (Some(94.0), Some(128.5), Some(54.0))
+    );
+    assert_eq!((points[1].hr, points[1].altitude), (None, None));
+}
+
+#[test]
+fn read_gpx_reads_hr_and_elevation() {
+    let gpx = FIXTURE.replace(
+        "<ns3:cad>50</ns3:cad>",
+        "<ns3:hr>101</ns3:hr><ns3:cad>50</ns3:cad>",
+    );
+    let gpx = gpx.replacen("<time>", "<ele>12.5</ele><time>", 1);
+    let root = xml::parse(&gpx).expect("could not parse the fixture");
+    let (points, _) = read_gpx(&root);
+
+    assert_eq!(
+        (points[0].hr, points[0].altitude),
+        (Some(101.0), Some(12.5))
+    );
+    assert_eq!((points[1].hr, points[1].altitude), (None, None));
+}
+
+#[test]
+fn detail_defaults_to_the_last_week() {
+    let today = Date {
+        year: 2026,
+        month: 1,
+        day: 3,
+    };
+    let args = detail_args(&Args::default(), today);
+    assert_eq!(
+        args.start,
+        Some(Date {
+            year: 2025,
+            month: 12,
+            day: 28,
+        })
+    );
+    assert_eq!(args.end, None);
+
+    // A range or an activity id keeps the dates as given.
+    let given = Args {
+        activities: Some(BTreeSet::from(["1".to_string()])),
+        ..Args::default()
+    };
+    assert_eq!(detail_args(&given, today).start, None);
+}
+
+#[test]
+fn detail_options_parse() {
+    let argv: Vec<String> = [
+        "--detail",
+        "--activity",
+        "1, 2",
+        "--min-pass=30",
+        "--smooth",
+        "6",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let args = parse(&argv).expect("the options should parse");
+
+    assert!(args.detail);
+    assert_eq!(
+        args.activities,
+        Some(BTreeSet::from(["1".to_string(), "2".to_string()]))
+    );
+    assert_eq!((args.min_pass, args.smooth), (30, 6));
+    assert!(help().contains("--detail"));
 }

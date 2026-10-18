@@ -31,19 +31,17 @@ pub fn read_gpx(root: &Node) -> (Vec<Point>, String) {
             if let Some((plat, plon)) = prev {
                 cumulative += haversine(plat, plon, lat, lon);
             }
-            let cadence = match pt.find("extensions") {
-                Some(ext) => match ext.find("TrackPointExtension") {
-                    Some(tpx) => num(&tpx.text("cad")),
-                    None => None,
-                },
-                None => None,
-            };
+            let tpx = pt
+                .find("extensions")
+                .and_then(|ext| ext.find("TrackPointExtension"));
             let point = Point {
                 time,
                 lat,
                 lon,
                 distance_m: cumulative,
-                cadence,
+                cadence: tpx.and_then(|tpx| num(&tpx.text("cad"))),
+                hr: tpx.and_then(|tpx| num(&tpx.text("hr"))),
+                altitude: num(&pt.text("ele")),
             };
             points.push(point);
             prev = Some((lat, lon));
@@ -103,6 +101,10 @@ pub fn read_tcx(root: &Node) -> (Vec<Point>, Vec<Lap>) {
                 lon,
                 distance_m: num(&tp.text("DistanceMeters")).unwrap_or(0.0),
                 cadence,
+                hr: tp
+                    .find("HeartRateBpm")
+                    .and_then(|hr| num(&hr.text("Value"))),
+                altitude: num(&tp.text("AltitudeMeters")),
             });
         }
 

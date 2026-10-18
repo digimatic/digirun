@@ -47,6 +47,20 @@ impl Date {
         Some(Date { year, month, day })
     }
 
+    /// Today's date in UTC.
+    pub fn today() -> Date {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        civil_from_days(secs.div_euclid(86400))
+    }
+
+    /// The date `days` days earlier.
+    pub fn minus_days(&self, days: i64) -> Date {
+        civil_from_days(days_from_civil(self.year, self.month, self.day) - days)
+    }
+
     /// `(iso_year, iso_week)`, matching `date.isocalendar()`.
     pub fn isocalendar(&self) -> (i32, u32) {
         let days = days_from_civil(self.year, self.month, self.day);
@@ -194,6 +208,20 @@ fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
         (153 * (if month > 2 { month - 3 } else { month + 9 }) as i64 + 2) / 5 + day as i64 - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     era * 146097 + doe - 719468
+}
+
+/// The date `days` after 1970-01-01 (Howard Hinnant's `civil_from_days`).
+fn civil_from_days(days: i64) -> Date {
+    let z = days + 719468;
+    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = (yoe + era * 400 + if month <= 2 { 1 } else { 0 }) as i32;
+    Date { year, month, day }
 }
 
 /// ISO weekday: 1 = Monday .. 7 = Sunday.

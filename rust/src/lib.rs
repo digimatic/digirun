@@ -16,6 +16,7 @@ pub mod dt;
 pub mod load;
 pub mod model;
 pub mod parse;
+pub mod passes;
 pub mod report;
 pub mod xml;
 
@@ -74,6 +75,10 @@ pub fn run(args: &Args) -> i32 {
         return 0;
     }
 
+    if args.detail {
+        return run_detail(&kept, args, &out_dir);
+    }
+
     let segments = collect_segments(&kept, args);
     let seg_refs: Vec<&Segment> = segments.iter().collect();
     let (kept_segments, dropped_slow, dropped_fast) = analyze::filter_segments(&seg_refs, args);
@@ -120,6 +125,65 @@ pub fn run(args: &Args) -> i32 {
     if !args.no_csv {
         let report_dir = expanduser(&args.report_dir);
         if let Err(error) = csvout::write_csvs(&report_dir, &kept, &kept_segments, args) {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    }
+    0
+}
+
+/// The range `--detail` covers: `--start/--end` when given, all of time for
+/// `--activity`, else the last DEFAULT_DETAIL_DAYS days up to today.
+pub fn detail_args(args: &Args, today: dt::Date) -> Args {
+    let mut args = args.clone();
+    if args.start.is_none() && args.end.is_none() && args.activities.is_none() {
+        args.start = Some(today.minus_days(args::DEFAULT_DETAIL_DAYS - 1));
+    }
+    args
+}
+
+fn run_detail(activities: &[&Activity], args: &Args, out_dir: &Path) -> i32 {
+    let args = &detail_args(args, dt::Date::today());
+    let selected: Vec<(&Activity, Vec<passes::Pass>)> = activities
+        .iter()
+        .copied()
+        .filter(|a| analyze::in_range(a, args))
+        .filter(|a| {
+            args.activities
+                .as_ref()
+                .is_none_or(|ids| ids.contains(&a.activity_id))
+        })
+        .map(|a| (a, passes::build_passes(a, args)))
+        .collect();
+    if selected.is_empty() {
+        println!(
+            "No activities in {} for the selected range or --activity.",
+            out_dir.display()
+        );
+        return 0;
+    }
+
+    let mut notes: Vec<String> = Vec::new();
+    let range = match (args.start, args.end) {
+        (Some(s), Some(e)) => Some(format!("{s} to {e}")),
+        (Some(s), None) => Some(format!("from {s}")),
+        (None, Some(e)) => Some(format!("up to {e}")),
+        (None, None) => None,
+    };
+    if let Some(range) = range {
+        notes.push(format!("Range: {range}"));
+    }
+    if let Some(ids) = &args.activities {
+        notes.push(format!(
+            "Activities: {}",
+            ids.iter().cloned().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    report::print_detail(&selected, args, &notes);
+
+    if !args.no_csv {
+        let report_dir = expanduser(&args.report_dir);
+        if let Err(error) = csvout::write_passes(&report_dir, &selected) {
             eprintln!("error: {error}");
             return 1;
         }

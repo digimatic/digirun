@@ -29,8 +29,40 @@ Run it from the repo root, because the default `--out` is `./runs`:
 - `--help` and argument errors are laid out the way argparse does, including the
   usage wrapping and the option column width
 
+## Detail mode (Rust only)
+
+`--detail` lists every run and walk **pass** (one continuous stretch of running
+or walking) in each session, with its stats. With no `--start/--end/--activity`
+it covers the last 7 days, today included:
+
+```bash
+./rust/target/release/garmin-analyze --max-pace 15:00 --min-pace 3:00 --detail
+./rust/target/release/garmin-analyze --detail --activity 12345678901
+```
+
+Passes are split on cadence, not on Garmin's laps, because a lap (a workout step
+or a 1 km auto-split) can hold both running and walking:
+
+1. cadence is smoothed with a rolling median over `--smooth` seconds (default 10)
+2. each trackpoint interval is labelled with hysteresis: above 71 strides/min is
+   a run, below 61 a walk, and inside the band the previous label holds. With
+   `--method cadence`, `--cadence-threshold` is a single cut-off instead. An
+   activity without cadence, or `--method pace`, uses a rolling pace against
+   `--pace-threshold`
+3. consecutive intervals with the same label make a pass, and a pause longer than
+   `--gap` ends it
+4. passes shorter than `--min-pass` seconds (default 20) join their longer neighbour
+
+Each pass shows its start, time, distance, pace (with sd/min/max over the
+`--window` sub-windows), cadence mean/sd/min/max, HR mean/min/max, HR drift (last
+third minus first third), elevation gain/loss, stride length, and the Garmin laps
+it overlaps. Each session gets per-class totals, and the whole range gets a summary.
+Passes outside `--max-pace/--min-pace` are marked `*` and left out of the totals.
+`passes.csv` in `--report-dir` holds one row per pass.
+
 ## Deliberate differences
 
+- `--detail` (above) exists only here.
 - A file that fails to parse is reported on stderr and skipped. The Python tool
   raises and stops the whole run, so one corrupt file takes down the report.
 - `--jobs` uses threads instead of processes. The pool is skipped below 8 files,
@@ -60,6 +92,7 @@ pool: 3.75x from one worker to eight, against 2.7x for Python.
 | `src/xml.rs` | small namespace-agnostic DOM, so `_find`/`_text` behave as in Python |
 | `src/model.rs` | `Point`, `Activity`, `Segment`, haversine |
 | `src/analyze.rs` | classification, segmentation, stats, filters, `round` |
+| `src/passes.rs` | `--detail`: cadence-split passes and their stats |
 | `src/dt.rs` | timestamps, dates, ISO weeks |
 | `src/csv.rs` / `src/csvout.rs` | CSV writing |
 | `src/report.rs` | the console tables |

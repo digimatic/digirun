@@ -16,12 +16,12 @@ pub fn round(value: f64, digits: usize) -> f64 {
         .unwrap_or(value)
 }
 
-fn mean(values: &[f64]) -> f64 {
+pub(crate) fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len() as f64
 }
 
 /// Sample standard deviation (`statistics.stdev`), which needs at least two values.
-fn stdev(values: &[f64]) -> f64 {
+pub(crate) fn stdev(values: &[f64]) -> f64 {
     if values.len() < 2 {
         return 0.0;
     }
