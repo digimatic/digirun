@@ -1,13 +1,21 @@
-# garmin-runs
+# digirun
 
-Download your runs from **Garmin Connect** as GPX files, plus a `summary.csv`
-with per-run stats. Built with [`garminconnect`](https://pypi.org/project/garminconnect/)
-and managed with [uv](https://docs.astral.sh/uv/).
+Download your runs from **Garmin Connect** as GPX/TCX files, plus a `summary.csv`
+with per-run stats, then analyze walk vs run pace offline.
+
+- `garmin-runs` (Python, in `src/`) downloads. Built with
+  [`garminconnect`](https://pypi.org/project/garminconnect/), which handles the
+  Garmin login, and managed with [uv](https://docs.astral.sh/uv/).
+- `garmin-analyze` (Rust, in `rust/`) analyzes the downloaded files.
+
+`./analyze.sh` does both: it fetches at most once an hour, then prints the report
+and the run/walk passes of the last 7 days.
 
 ## Setup
 
 ```bash
-uv sync
+uv sync                                # the downloader
+cd rust && cargo build --release       # the analyzer
 ```
 
 ## Credentials
@@ -73,21 +81,22 @@ only fetches what's missing and refreshes the summary.
 
 `garmin-analyze` works entirely offline on the files in `./runs` — no login, no
 network. It splits each activity into time windows, classifies every window as
-walk or run, and reports mean pace + standard deviation per class, per activity,
-per week, and pooled overall.
+walk or run, and reports pace (total time / total distance) and the standard
+deviation of the segment paces per class, per activity, per week, and pooled
+overall.
 
-There is also a Rust port in `rust/` that produces the same report and the same
-CSVs (`cargo build --release`, then `rust/target/release/garmin-analyze`); it is
-what `analyze.sh` runs, and it is about seven times faster on this data — 0.16 s
-against 1.2 s for the full report. See `rust/README.md` for the differences.
+Run it from the repo root, because the default `--out` is `./runs`. See
+`rust/README.md` for the `--show` tables, the detail table, and the code layout.
 
 ```bash
-uv run garmin-analyze                                   # ./runs, method=hybrid
-uv run garmin-analyze --method pace --pace-threshold 9:00
-uv run garmin-analyze --window 30 --min-segment 20 --gap 60
-uv run garmin-analyze --start 2026-08-01 --end 2026-09-30 --no-csv
-uv run garmin-analyze --cadence-stats            # add cadence mean + stdev
-uv run garmin-analyze --max-pace 15:00 --min-pace 3:00 --cadence-stats   # the usual set
+alias garmin-analyze=./rust/target/release/garmin-analyze
+
+garmin-analyze                                   # ./runs, method=hybrid
+garmin-analyze --method pace --pace-threshold 9:00
+garmin-analyze --window 30 --min-segment 20 --gap 60
+garmin-analyze --start 2026-08-01 --end 2026-09-30 --no-csv
+garmin-analyze --cadence-stats            # add cadence mean + stdev
+garmin-analyze --max-pace 15:00 --min-pace 3:00 --cadence-stats   # the usual set
 ```
 
 ### How segments are classified
@@ -115,7 +124,9 @@ ignored as GPS noise.
 | `--out` | directory of downloaded files (default `./runs`) |
 | `--start` / `--end` | restrict to a date range |
 | `--type` | activity types to analyze: `all`, or comma-separated keys (default `running,trail,walking`) |
-| `--jobs` | worker processes used to parse the files (default `min(cpu_count, 8)`; `1` runs single-process) |
+| `--days N` | only the last N days, up to `--end` or today |
+| `--activity` | only these comma-separated activity ids |
+| `--jobs` | worker threads used to parse the files (default `min(cpu_count, 8)`; `1` runs single-threaded) |
 | `--method` | `hybrid` (default), `cadence`, `pace`, `lap` |
 | `--cadence-threshold` | strides/min at or above which a segment is a run (default 65) |
 | `--pace-threshold` | pace cutoff as `M:SS` or seconds (default `9:00`) |
@@ -125,6 +136,8 @@ ignored as GPS noise.
 | `--max-pace` | exclude segments slower than this from the stats, e.g. `15:00` (default: none) |
 | `--min-pace` | exclude segments faster than this from the stats, e.g. `3:00` (default: none) |
 | `--cadence-stats` | also report cadence mean + stdev (strides/min) |
+| `--min-pass` / `--smooth` | detail table: shortest pass, and cadence smoothing (default 20 s / 10 s) |
+| `--show` | tables to print: `activities,weekly,overall` (default), `detail`, or `all` |
 | `--report-dir` | where the CSVs are written (default `./runs/analysis`) |
 | `--no-csv` | print the report only |
 
@@ -145,12 +158,9 @@ file are skipped and reported as unknown type. Without the filter, cycling segme
 (2–3 min/km) are classified as run and lift or coast time as walk, which skews both
 numbers — so `--type all` is fine for archiving, but analyze it with a filter.
 
-`--jobs` parses the files in a pool of worker processes, which is where the time
-goes: 255 activities take about 3.7 s single-process and 1.2 s with 8 workers. Files
-are grouped in sorted order and results are collected in that same order, so the
-report and the CSVs are identical with `--jobs 1` and `--jobs 8`. The pool is skipped
-when there are fewer than 8 activities, where it costs more than it saves. The Rust
-port does the same work with threads, so it does not pay the process startup cost.
+`--jobs` parses the files on a pool of threads. Results keep the sorted file order,
+so the report and the CSVs are the same with `--jobs 1` and `--jobs 8`; below 8
+activities the pool is skipped. The 255 activities here take 0.16 s with 8 threads.
 
 ### Analysis output
 
@@ -160,23 +170,22 @@ port does the same work with threads, so it does not pay the process startup cos
   (plus `mean_cadence, stdev_cadence` with `--cadence-stats`)
 - `runs/analysis/segments.csv` — one row per segment: `activity_id, date, time,
   class, pace_s_per_km, cadence, distance_m, window_s`
+- `runs/analysis/passes.csv` — one row per run/walk pass, with `--show detail`
 
 Example (this data, with `--max-pace 15:00 --min-pace 3:00 --cadence-stats`):
 
 ```
 Overall
 class       n    time  dist km    mean     sd     min     max  share    cad     sd
-run      1887 16:55:32   139.12    7:25   0:56    3:21   12:18  26.3%   76.7    3.7
-walk     5282 47:31:15   248.82   11:39   1:28    5:24   15:00  73.7%   53.4    5.6
+----------------------------------------------------------------------------------
+run      1965 17:37:22   144.55    7:19   0:57    3:21   12:18  26.8%   76.8    3.7
+walk     5356 48:11:23   252.50   11:27   1:28    5:24   15:00  73.2%   53.4    5.7
 ```
 
 ## Tests
 
 ```bash
-uv run pytest
-cd rust && cargo test     # the same suite, ported to Rust
+cd rust && cargo test
 ```
 
-Pace values in the CSVs are seconds per kilometre, matching `summary.csv`. The Rust
-tests mirror the Python ones, and the Rust binary is checked against the Python tool
-on the real data: same report, same CSVs.
+Pace values in the CSVs are seconds per kilometre, matching `summary.csv`.

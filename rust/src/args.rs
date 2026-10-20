@@ -121,7 +121,7 @@ pub struct Args {
     pub smooth: i64,
 }
 
-/// Worker processes/threads used to parse the files.
+/// Worker threads used to parse the files.
 pub fn default_jobs() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
@@ -331,7 +331,7 @@ fn groups() -> Vec<Group> {
                     &["--jobs"],
                     "N",
                     format!(
-                        "worker processes used to parse the files (default: {jobs} = min(cpu_count, 8); 1 runs single-process)"
+                        "worker threads used to parse the files (default: {jobs} = min(cpu_count, 8); 1 runs single-threaded)"
                     ),
                 ),
             ],

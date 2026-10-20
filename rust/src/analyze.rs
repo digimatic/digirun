@@ -9,7 +9,7 @@ pub const RUN: &str = "run";
 pub const WALK: &str = "walk";
 
 /// Python's `round(value, digits)`: the correctly rounded decimal, read back as
-/// a float, so the numbers written to the CSVs match the Python tool.
+/// a float, so the CSVs hold short, stable numbers.
 pub fn round(value: f64, digits: usize) -> f64 {
     format!("{:.*}", digits, value)
         .parse::<f64>()
@@ -159,8 +159,8 @@ pub fn lap_segments(activity: &Activity, args: &Args) -> Vec<Segment> {
 /// Pace (total time / total distance) and the stdev of the segment paces, plus
 /// cadence where the segments have it.
 ///
-/// The Python tool averages the segment paces instead, which reads slower: a
-/// slow segment covers less ground in the same time, so it weighs in more.
+/// Averaging the segment paces would read slower: a slow segment covers less
+/// ground in the same time, so it would weigh in more.
 pub fn stats(groups: &[&Segment]) -> Stats {
     let paces: Vec<f64> = groups.iter().map(|s| s.pace_s_per_km).collect();
     let cadences: Vec<f64> = groups.iter().filter_map(|s| s.cadence).collect();

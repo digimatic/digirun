@@ -26,9 +26,8 @@ else
     uv run garmin-runs --out "$OUT"
 fi
 
-# The Rust port of the analyzer (rust/README.md), built once on first use.
-# Set DIGIRUN_ANALYZE to the Python entry point to compare the two.
-ANALYZE="${DIGIRUN_ANALYZE:-rust/target/release/garmin-analyze}"
+# The analyzer (rust/README.md), built once on first use.
+ANALYZE=rust/target/release/garmin-analyze
 [ -x "$ANALYZE" ] || (cd rust && cargo build --release)
 
 "$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 --cadence-stats \

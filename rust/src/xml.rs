@@ -1,8 +1,8 @@
 //! A small namespace-agnostic XML tree.
 //!
-//! The Python version walks `ElementTree` and matches elements by their local
-//! name, which is what these files need: GPX and TCX use different namespace
-//! prefixes for the same elements (`ns3:TrackPointExtension` vs `TPX`).
+//! Elements are matched by their local name, which is what these files need:
+//! GPX and TCX use different namespace prefixes for the same elements
+//! (`ns3:TrackPointExtension` vs `TPX`).
 
 use quick_xml::events::Event;
 use quick_xml::Reader;

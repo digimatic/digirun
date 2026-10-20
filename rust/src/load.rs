@@ -129,7 +129,7 @@ pub fn read_group(aid: &str, files: &Files) -> Result<Option<Activity>, String> 
         return Ok(None);
     }
 
-    // The name and date come from the GPX file when there is one, as in Python.
+    // The name and date come from the GPX file when there is one.
     let source = gpx.or(tcx).unwrap();
     let name = if gpx_name.is_empty() {
         name_from_filename(source)
