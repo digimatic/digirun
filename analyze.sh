@@ -19,21 +19,21 @@ if [ -f "$STAMP" ] && [ "$FORCE" -eq 0 ]; then
         echo "Fetch skipped: last attempt ${age}s ago, next in $((INTERVAL - age))s (--force to fetch anyway)."
     else
         date +%s > "$STAMP"   # stamp the attempt, so failures also count against the interval
-        uv run garmin-runs --out "$OUT"
+        uv run --project fetch garmin-runs --out "$OUT"
     fi
 else
     date +%s > "$STAMP"
-    uv run garmin-runs --out "$OUT"
+    uv run --project fetch garmin-runs --out "$OUT"
 fi
 
-# The analyzer (rust/README.md), built once on first use.
-ANALYZE=rust/target/release/garmin-analyze
-[ -x "$ANALYZE" ] || (cd rust && cargo build --release)
+# The analyzer (analyze/README.md), built once on first use.
+ANALYZE=analyze/target/release/garmin-analyze
+[ -x "$ANALYZE" ] || cargo build --release --manifest-path analyze/Cargo.toml
 
 "$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 --cadence-stats \
     --type running,trail,walking
 
-# Every run/walk pass of the last 7 days, split on cadence (rust/README.md).
+# Every run/walk pass of the last 7 days, split on cadence (analyze/README.md).
 echo
 "$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 --show detail --days 7 \
     --type running,trail,walking

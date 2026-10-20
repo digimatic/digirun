@@ -13,5 +13,5 @@ wheels/
 runs/
 
 # Rust build output
-rust/target/
+analyze/target/
 
