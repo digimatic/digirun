@@ -3,6 +3,7 @@ name = "garmin-runs"
 version = "0.1.0"
 description = "Download runs from Garmin Connect as GPX/TCX files plus a summary CSV, and analyze walk vs run pace"
 readme = "README.md"
+license = "MIT"
 authors = [
     { name = "Peter Westerström", email = "peter@westerstrom.com" }
 ]

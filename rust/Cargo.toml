@@ -2,6 +2,7 @@
 name = "garmin-analyze"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 description = "Split downloaded GPX/TCX activities into walk and run segments and report pace mean + stdev per class"
 
 [dependencies]
