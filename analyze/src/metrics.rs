@@ -58,6 +58,8 @@ pub struct Session<'a> {
     pub run_m: f64,
     pub walk_m: f64,
     pub longest_run_s: f64,
+    /// The distance of that same run, which need not be the farthest.
+    pub longest_run_m: f64,
     pub run_hr: Option<f64>,
     pub elev_gain: Option<f64>,
     /// Run speed in m/min per heartbeat/min.
@@ -95,6 +97,7 @@ pub struct Week {
     pub monday: Date,
     pub sessions: usize,
     pub longest_run_s: f64,
+    pub longest_run_m: f64,
     pub run_s: f64,
     pub walk_s: f64,
     pub km: f64,
@@ -111,6 +114,7 @@ impl Week {
             monday,
             sessions: 0,
             longest_run_s: 0.0,
+            longest_run_m: 0.0,
             run_s: 0.0,
             walk_s: 0.0,
             km: 0.0,
@@ -428,6 +432,9 @@ fn session<'a>(activity: &'a Activity, route: Option<usize>, args: &Args) -> Ses
         .as_ref()
         .map_or((0.0, 0.0), |w| (w.time_s, w.distance_m));
     let run_hr = run.as_ref().and_then(|r| r.hr_mean);
+    let longest = run_passes
+        .iter()
+        .max_by(|a, b| a.stats.time_s.total_cmp(&b.stats.time_s));
 
     let (mut zones_all, mut zones_run) = ([0.0; ZONES], [0.0; ZONES]);
     let (mut zone3_time, mut zone3_metres) = (0.0, 0.0);
@@ -463,10 +470,8 @@ fn session<'a>(activity: &'a Activity, route: Option<usize>, args: &Args) -> Ses
         walk_s,
         run_m,
         walk_m,
-        longest_run_s: run_passes
-            .iter()
-            .map(|p| p.stats.time_s)
-            .fold(0.0, f64::max),
+        longest_run_s: longest.map_or(0.0, |p| p.stats.time_s),
+        longest_run_m: longest.map_or(0.0, |p| p.stats.distance_m),
         run_hr,
         elev_gain: passes
             .iter()
@@ -506,7 +511,10 @@ pub fn weeks(sessions: &[Session]) -> Vec<Week> {
         let index = ((s.activity.date.monday().days() - first.monday().days()) / 7) as usize;
         let week = &mut out[index];
         week.sessions += 1;
-        week.longest_run_s = week.longest_run_s.max(s.longest_run_s);
+        if s.longest_run_s > week.longest_run_s {
+            week.longest_run_s = s.longest_run_s;
+            week.longest_run_m = s.longest_run_m;
+        }
         week.run_s += s.run_s;
         week.walk_s += s.walk_s;
         week.km += s.km();
@@ -536,6 +544,7 @@ pub struct Baseline {
     pub km: f64,
     /// The longest run in those four weeks, not a mean.
     pub longest_run_s: f64,
+    pub longest_run_m: f64,
 }
 
 /// None until the history covers all four weeks. A week without a row after the
@@ -550,6 +559,7 @@ pub fn previous_weeks(weeks: &[Week], monday: Date) -> Option<Baseline> {
         run_s: 0.0,
         km: 0.0,
         longest_run_s: 0.0,
+        longest_run_m: 0.0,
     };
     for week in weeks
         .iter()
@@ -558,7 +568,10 @@ pub fn previous_weeks(weeks: &[Week], monday: Date) -> Option<Baseline> {
         baseline.sessions += week.sessions as f64 / 4.0;
         baseline.run_s += week.run_s / 4.0;
         baseline.km += week.km / 4.0;
-        baseline.longest_run_s = baseline.longest_run_s.max(week.longest_run_s);
+        if week.longest_run_s > baseline.longest_run_s {
+            baseline.longest_run_s = week.longest_run_s;
+            baseline.longest_run_m = week.longest_run_m;
+        }
     }
     Some(baseline)
 }

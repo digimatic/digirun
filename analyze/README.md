@@ -172,7 +172,7 @@ garmin-analyze --max-pace 15:00 --min-pace 3:00 --show progress,fitness --days 9
 | Table | Contents |
 | --- | --- |
 | `summary` | this week so far against the mean of the previous 4 weeks, plus the acute:chronic ratio |
-| `progress` | per ISO week, empty weeks included: sessions, longest continuous run, run and walk time, run share, km, km against the previous 4 weeks |
+| `progress` | per ISO week, empty weeks included: sessions, longest continuous run (time and distance), run and walk time, run share, km, km against the previous 4 weeks |
 | `zones` | per week: minutes in each HR zone (run passes and all time), Edwards TRIMP; needs `--hr-max` |
 | `fitness` | per session, grouped by route: pace, grade-adjusted pace, HR, efficiency, decoupling, pace in zone 3, HR recovery, gain |
 | `efforts` | fastest 1, 3 and 5 km, with and without walking, and predictions |

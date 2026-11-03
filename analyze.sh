@@ -20,7 +20,17 @@ OUT="${DIGIRUN_OUT:-./runs}"
 INTERVAL="${DIGIRUN_INTERVAL:-3600}"
 STAMP="$OUT/.last_fetch"
 FORCE=0
-[ "${1:-}" = "--force" ] && FORCE=1
+FULL=0
+for arg in "$@"; do
+    case "$arg" in
+        --force) FORCE=1 ;;
+        --full) FULL=1 ;;
+        *)
+            echo "usage: $0 [--force] [--full]" >&2
+            exit 2
+            ;;
+    esac
+done
 
 mkdir -p "$OUT"
 now=$(date +%s)
@@ -51,7 +61,19 @@ echo
 "$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 --show detail --days 7 \
     --type running,trail
 
-# This week against the previous 4 weeks. Set DIGIRUN_HR_MAX for the HR load.
+# Set DIGIRUN_HR_MAX for HR zones and load (analyze/README.md).
 echo
-"$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 --show summary \
-    --type running,trail ${DIGIRUN_HR_MAX:+--hr-max "$DIGIRUN_HR_MAX"}
+if [ "$FULL" -eq 1 ]; then
+    # Every metric table, over all history.
+    "$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 \
+        --show progress,zones,fitness,efforts,summary \
+        --type running,trail ${DIGIRUN_HR_MAX:+--hr-max "$DIGIRUN_HR_MAX"}
+else
+    # The last 8 weeks, then this week against the previous 4. Only the summary
+    # writes the CSVs, because they cover the range and it has none.
+    "$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 --show progress --days 56 --no-csv \
+        --type running,trail
+    echo
+    "$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 --show summary \
+        --type running,trail ${DIGIRUN_HR_MAX:+--hr-max "$DIGIRUN_HR_MAX"}
+fi

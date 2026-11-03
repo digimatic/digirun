@@ -880,6 +880,7 @@ fn weeks_keep_the_gaps_and_baselines_look_back() {
     assert_eq!(metrics.weeks[3].km_baseline, None); // three weeks of history
     near(metrics.weeks[4].km_baseline.unwrap(), 0.75, 0.01); // 3 km over 4 weeks
     assert_eq!(metrics.weeks[5].longest_run_s, 600.0);
+    assert_eq!(metrics.weeks[5].longest_run_m, 1500.0);
     assert!(!metrics.weeks[3].in_range(&args));
     assert!(metrics.weeks[4].in_range(&args)); // its Sunday is in range
 
@@ -1076,4 +1077,17 @@ fn metric_options_parse() {
         2
     );
     assert!(help().contains("--hr-max BPM"));
+}
+
+#[test]
+fn longest_run_distance_belongs_to_the_longest_time() {
+    // The slower run lasts longer but covers less ground than the faster one.
+    let slow = session_on(date(2026, 8, 3), "1", &[(600, 80.0, 1.5)], |_| 150.0);
+    let fast = session_on(date(2026, 8, 5), "2", &[(400, 80.0, 3.0)], |_| 150.0);
+    let metrics = build(&[&slow, &fast], &Args::default());
+    assert_eq!(metrics.weeks[0].longest_run_s, 600.0);
+    assert_eq!(metrics.weeks[0].longest_run_m, 900.0);
+
+    let later = previous_weeks(&metrics.weeks, date(2026, 8, 31)).unwrap();
+    assert_eq!((later.longest_run_s, later.longest_run_m), (600.0, 900.0));
 }

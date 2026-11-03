@@ -256,7 +256,7 @@ fn write_file(path: &Path, contents: &str) -> Result<(), String> {
     std::fs::write(path, contents).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-pub const SESSION_FIELDS: [&str; 20] = [
+pub const SESSION_FIELDS: [&str; 21] = [
     "date",
     "activity_id",
     "name",
@@ -267,6 +267,7 @@ pub const SESSION_FIELDS: [&str; 20] = [
     "run_m",
     "walk_m",
     "longest_run_s",
+    "longest_run_m",
     "run_pace_s_per_km",
     "grade_adjusted_pace_s_per_km",
     "run_hr",
@@ -279,11 +280,12 @@ pub const SESSION_FIELDS: [&str; 20] = [
     "km",
 ];
 
-pub const WEEK_FIELDS: [&str; 19] = [
+pub const WEEK_FIELDS: [&str; 20] = [
     "week",
     "monday",
     "sessions",
     "longest_run_s",
+    "longest_run_m",
     "run_s",
     "walk_s",
     "km",
@@ -323,6 +325,7 @@ pub fn write_metrics(report_dir: &Path, metrics: &Metrics, args: &Args) -> Resul
             py_num(round(s.run_m, 1)),
             py_num(round(s.walk_m, 1)),
             py_num(round(s.longest_run_s, 1)),
+            py_num(round(s.longest_run_m, 1)),
             num(s.run_pace(), 1),
             num(s.grade_adjusted_pace, 1),
             num(s.run_hr, 1),
@@ -346,6 +349,7 @@ pub fn write_metrics(report_dir: &Path, metrics: &Metrics, args: &Args) -> Resul
             week.monday.isoformat(),
             week.sessions.to_string(),
             py_num(round(week.longest_run_s, 1)),
+            py_num(round(week.longest_run_m, 1)),
             py_num(round(week.run_s, 1)),
             py_num(round(week.walk_s, 1)),
             py_num(round(week.km, 2)),

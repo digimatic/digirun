@@ -21,8 +21,10 @@ export GARMIN_EMAIL=you@example.com   # the password is prompted for, once
 ```
 
 `./analyze.sh` fetches at most once an hour (`--force` to fetch anyway), then
-prints the report, every run/walk pass of the last 7 days, and this week against
-the previous 4. `DIGIRUN_OUT` and `DIGIRUN_INTERVAL` override the data directory and
+prints the report, every run/walk pass of the last 7 days, weekly progress over the
+last 8 weeks, and this week against the previous 4. `--full` swaps the last two for
+every metric table over all history: progress, HR zones, fitness and best efforts.
+`DIGIRUN_OUT` and `DIGIRUN_INTERVAL` override the data directory and
 the interval, and `DIGIRUN_HR_MAX` adds HR load to the weekly summary. Settings can
 go in a `.env` file, which is gitignored (see [`.env.example`](.env.example)); a
 variable set in the shell wins over it.

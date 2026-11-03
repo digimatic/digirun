@@ -500,17 +500,22 @@ fn print_progress(metrics: &Metrics, args: &Args) {
     println!();
     println!("Progress");
     let header = format!(
-        "{:<10} {:>4} {:>8} {:>8} {:>8} {:>5} {:>7} {:>6}",
-        "week", "sess", "longest", "run", "walk", "run%", "km", "vs 4wk"
+        "{:<10} {:>4} {:>8} {:>7} {:>8} {:>8} {:>5} {:>7} {:>6}",
+        "week", "sess", "longest", "lng km", "run", "walk", "run%", "km", "vs 4wk"
     );
     println!("{header}");
     println!("{}", "-".repeat(header.chars().count()));
     for week in metrics.weeks.iter().filter(|w| w.in_range(args)) {
         println!(
-            "{:<10} {:>4} {:>8} {:>8} {:>8} {} {:>7.2} {:>6}",
+            "{:<10} {:>4} {:>8} {} {:>8} {:>8} {} {:>7.2} {:>6}",
             week.label(),
             week.sessions,
             duration_or_dash(week.longest_run_s),
+            opt(
+                (week.longest_run_m > 0.0).then_some(week.longest_run_m / 1000.0),
+                7,
+                |v| format!("{v:.2}")
+            ),
             duration_or_dash(week.run_s),
             duration_or_dash(week.walk_s),
             opt(week.run_share(), 5, int),
@@ -737,6 +742,8 @@ fn print_summary(metrics: &Metrics, args: &Args, reference: Date) {
     let km = current.map_or(0.0, |w| w.km);
     let run_s = current.map_or(0.0, |w| w.run_s);
     let longest = current.map_or(0.0, |w| w.longest_run_s);
+    let longest_km = current.map_or(0.0, |w| w.longest_run_m) / 1000.0;
+    let baseline_longest_km = baseline.map(|b| b.longest_run_m / 1000.0);
     println!(
         "{:<12} {:>8} {} {:>6}",
         "sessions",
@@ -765,7 +772,14 @@ fn print_summary(metrics: &Metrics, args: &Args, reference: Date) {
         opt(baseline.map(|b| b.longest_run_s), 8, fmt_duration),
         change(longest, baseline.map(|b| b.longest_run_s))
     );
-    println!("(the longest run row compares with the longest of those 4 weeks, not their mean)");
+    println!(
+        "{:<12} {:>8.2} {} {:>6}",
+        "longest km",
+        longest_km,
+        opt(baseline_longest_km, 8, |v| format!("{v:.2}")),
+        change(longest_km, baseline_longest_km)
+    );
+    println!("(the longest rows compare with the longest of those 4 weeks, not their mean)");
     println!();
     println!("{}", load_line("Volume", km_load(metrics, reference), "km"));
     if args.hr_max.is_some() {
