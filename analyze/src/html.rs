@@ -1,7 +1,9 @@
 //! The report as one self-contained HTML page, with its charts as inline SVG.
 //!
 //! The page loads nothing from the network and holds no latitude or longitude:
-//! route drawings are fitted to the picture (src/map.rs). Every range-dependent
+//! route drawings are fitted to the picture (src/map.rs). The exception is --map,
+//! which adds positions and an embedded Leaflet for satellite maps, fetching tiles
+//! while the page's button is on, as it is at first. Every range-dependent
 //! section is rendered once per range, and the toggle in the nav picks which one
 //! shows.
 
@@ -24,6 +26,11 @@ use crate::report::{
 
 const CSS: &str = include_str!("report.css");
 const JS: &str = include_str!("report.js");
+const MAP_CSS: &str = include_str!("report_map.css");
+const MAP_JS: &str = include_str!("report_map.js");
+const LEAFLET_JS: &str = include_str!("vendor/leaflet/leaflet.js");
+const LEAFLET_CSS: &str = include_str!("vendor/leaflet/leaflet.css");
+const LEAFLET_LICENSE: &str = include_str!("vendor/leaflet/LICENSE");
 
 const RECENT_DAYS: i64 = 182;
 /// More routes than this on one chart cannot be told apart reliably by colour.
@@ -92,15 +99,22 @@ pub fn render(metrics: &Metrics, args: &Args, reference: Date) -> String {
     let views = [recent, all];
     let routes = charted_routes(&sessions);
 
+    let map_head = if args.map {
+        format!(
+            "<!-- Leaflet 1.9.4\n{LEAFLET_LICENSE}-->\n<style>\n{LEAFLET_CSS}{MAP_CSS}</style>\n"
+        )
+    } else {
+        String::new()
+    };
     let mut page = String::new();
     page.push_str(&format!(
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>Running report</title>\n<style>\n{CSS}</style>\n</head>\n\
+         <title>Running report</title>\n{map_head}<style>\n{CSS}</style>\n</head>\n\
          <body data-range=\"{default_range}\">\n"
     ));
     page.push_str(&header(&sessions, args));
-    page.push_str(&nav(default_range));
+    page.push_str(&nav(default_range, args.map));
     page.push_str("<main>\n");
     page.push_str(&overview(metrics, args, reference));
 
@@ -140,15 +154,24 @@ pub fn render(metrics: &Metrics, args: &Args, reference: Date) -> String {
              for its sessions.</p>\n",
         );
         for view in &views {
-            out.push_str(&in_view(view, &routes_section(&view.sessions, &routes)));
+            out.push_str(&in_view(
+                view,
+                &routes_section(&view.sessions, &routes, args.map),
+            ));
         }
     }));
     page.push_str(&section("sessions", "Sessions", |out| {
         out.push_str(&sessions_table(&sessions, cutoff, args));
     }));
-    page.push_str("</main>\n<div id=\"tip\" hidden></div>\n<script>\n");
-    page.push_str(JS);
-    page.push_str("</script>\n</body>\n</html>\n");
+    page.push_str("</main>\n<div id=\"tip\" hidden></div>\n");
+    if args.map {
+        page.push_str(&format!("<script>\n{LEAFLET_JS}</script>\n"));
+    }
+    page.push_str(&format!("<script>\n{JS}</script>\n"));
+    if args.map {
+        page.push_str(&format!("<script>\n{MAP_JS}</script>\n"));
+    }
+    page.push_str("</body>\n</html>\n");
     page
 }
 
@@ -187,13 +210,18 @@ fn header(sessions: &[&Session], args: &Args) -> String {
     if let Some(bpm) = args.hr_max {
         facts.push(format!("HR max {bpm} bpm"));
     }
+    let warning = if args.map {
+        "<p>This page holds your GPS positions, so keep it private.</p>\n"
+    } else {
+        ""
+    };
     format!(
-        "<header>\n<h1>Running report</h1>\n<p>{}</p>\n</header>\n",
+        "<header>\n<h1>Running report</h1>\n<p>{}</p>\n{warning}</header>\n",
         esc(&facts.join(" · "))
     )
 }
 
-fn nav(default_range: &str) -> String {
+fn nav(default_range: &str, with_map: bool) -> String {
     let links: String = [
         ("overview", "Overview"),
         ("progress", "Progress"),
@@ -206,6 +234,11 @@ fn nav(default_range: &str) -> String {
     .iter()
     .map(|(id, label)| format!("<a href=\"#{id}\">{label}</a>"))
     .collect();
+    let map_button = if with_map {
+        "<button type=\"button\" id=\"map-toggle\" aria-pressed=\"true\">Satellite map</button>"
+    } else {
+        ""
+    };
     let button = |key: &str, label: &str| {
         format!(
             "<button type=\"button\" data-set-range=\"{key}\" aria-pressed=\"{}\">{label}</button>",
@@ -213,8 +246,8 @@ fn nav(default_range: &str) -> String {
         )
     };
     format!(
-        "<nav>\n<div class=\"links\">{links}</div>\n<div class=\"range\" role=\"group\" \
-         aria-label=\"Date range\">{}{}</div>\n</nav>\n",
+        "<nav>\n<div class=\"links\">{links}</div>\n<div class=\"controls\">{map_button}<div class=\"range\" role=\"group\" \
+         aria-label=\"Date range\">{}{}</div></div>\n</nav>\n",
         button("recent", "Last 6 months"),
         button("all", "All")
     )
@@ -880,7 +913,7 @@ fn session_rows(s: &Session, cutoff: Date, args: &Args, columns: usize) -> Strin
     row.push_str(&format!(
         "</tr>\n<tr class=\"passes\" hidden><td colspan=\"{columns}\"><div class=\"session-detail\">\
          {}{}</div></td></tr>\n</tbody>\n",
-        session_map(s.activity, &passes),
+        session_map(s.activity, &passes, args.map),
         passes_table(&passes)
     ));
     row

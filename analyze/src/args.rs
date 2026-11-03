@@ -161,6 +161,8 @@ pub struct Args {
     pub hr_max: Option<i64>,
     /// Where to write the HTML report, if anywhere.
     pub html: Option<PathBuf>,
+    /// Add satellite maps to the HTML report, which then holds GPS positions.
+    pub map: bool,
 }
 
 /// Worker threads used to parse the files.
@@ -209,6 +211,7 @@ impl Default for Args {
             smooth: DEFAULT_SMOOTH_S,
             hr_max: None,
             html: None,
+            map: false,
         }
     }
 }
@@ -497,6 +500,11 @@ fn groups() -> Vec<Group> {
                     "PATH",
                     "also write the metrics as one self-contained HTML page with charts, whatever --show picks".to_string(),
                 ),
+                Action::new(
+                    &["--map"],
+                    "",
+                    "add a satellite map to the HTML report, with a button to turn it off; the page then holds GPS positions and fetches imagery from EOX when opened".to_string(),
+                ),
             ],
         },
     ]
@@ -762,6 +770,7 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
             "--cadence-stats" => args.cadence_stats = true,
             "--no-csv" => args.no_csv = true,
             "--html" => args.html = Some(PathBuf::from(value(&mut i)?)),
+            "--map" => args.map = true,
             "--show" => {
                 let raw = value(&mut i)?;
                 let mut show = Tables::none();
@@ -854,6 +863,9 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
     }
 
     args.jobs = args.jobs.max(1);
+    if args.map && args.html.is_none() {
+        return Err(CliError::argument("argument --map: needs --html"));
+    }
     if let Some(days) = args.days {
         if args.start.is_some() {
             return Err(CliError::argument(

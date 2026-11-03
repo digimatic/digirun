@@ -22,13 +22,16 @@ STAMP="$OUT/.last_fetch"
 FORCE=0
 FULL=0
 OPEN=0
+MAP="${DIGIRUN_MAP:-1}"
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=1 ;;
         --full) FULL=1 ;;
         --open) OPEN=1 ;;
+        --map) MAP=1 ;;
+        --no-map) MAP=0 ;;
         *)
-            echo "usage: $0 [--force] [--full] [--open]" >&2
+            echo "usage: $0 [--force] [--full] [--open] [--map|--no-map]" >&2
             exit 2
             ;;
     esac
@@ -67,11 +70,17 @@ echo
 echo
 # The charts and tables in one page, always over all history.
 REPORT="$OUT/analysis/report.html"
+# The satellite map means the page also holds GPS positions (analyze/README.md);
+# --no-map or DIGIRUN_MAP=0 leaves them out.
+MAP_FLAG=""
+if [ "$MAP" = "1" ]; then
+    MAP_FLAG="--map"
+fi
 if [ "$FULL" -eq 1 ]; then
     # Every metric table, over all history.
     "$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 \
         --show progress,zones,fitness,efforts,summary \
-        --html "$REPORT" --type running,trail ${DIGIRUN_HR_MAX:+--hr-max "$DIGIRUN_HR_MAX"}
+        --html "$REPORT" $MAP_FLAG --type running,trail ${DIGIRUN_HR_MAX:+--hr-max "$DIGIRUN_HR_MAX"}
 else
     # The last 8 weeks, then this week against the previous 4. Only the summary
     # writes the CSVs, because they cover the range and it has none.
@@ -79,7 +88,7 @@ else
         --type running,trail
     echo
     "$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 --show summary \
-        --html "$REPORT" --type running,trail ${DIGIRUN_HR_MAX:+--hr-max "$DIGIRUN_HR_MAX"}
+        --html "$REPORT" $MAP_FLAG --type running,trail ${DIGIRUN_HR_MAX:+--hr-max "$DIGIRUN_HR_MAX"}
 fi
 
 if [ "$OPEN" -eq 1 ]; then

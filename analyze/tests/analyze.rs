@@ -1225,6 +1225,54 @@ fn run_from(id: &str, day: u32, lat: f64, lon: f64) -> Activity {
 }
 
 #[test]
+fn map_needs_html() {
+    let map = "--map".to_string();
+    assert!(parse(std::slice::from_ref(&map)).is_err());
+    let html = ["--html".to_string(), "r.html".to_string(), map];
+    assert!(parse(&html).unwrap().map);
+    assert!(!parse(&[]).unwrap().map);
+}
+
+#[test]
+fn html_adds_the_map_and_positions_only_when_asked() {
+    let run = run_from("1", 3, 57.7412345, 12.1298765);
+    let plain = html_args(None);
+    let page = render(&build(&[&run], &plain), &plain, august(3));
+    assert!(!page.contains("map-toggle"));
+    assert!(!page.to_lowercase().contains("leaflet"));
+    assert!(!page.contains("s2cloudless"));
+    assert!(!page.contains("data-track"));
+
+    let with_map = Args {
+        map: true,
+        ..html_args(None)
+    };
+    let page = render(&build(&[&run], &with_map), &with_map, august(3));
+    assert!(page.contains("id=\"map-toggle\" aria-pressed=\"true\""));
+    assert!(page.contains("s2cloudless-2025_3857"));
+    assert!(page.contains("EOX IT Services GmbH"));
+    assert!(page.contains("[57.74123,12.12988]"));
+    assert!(page.contains("keep it private"));
+    // The embedded scripts must not end their own script element early.
+    assert_eq!(
+        page.matches("<script>").count(),
+        page.matches("</script>").count()
+    );
+}
+
+#[test]
+fn map_tolerates_a_session_without_a_track() {
+    let run = run_on("1", "Run", 3);
+    let args = Args {
+        map: true,
+        ..html_args(None)
+    };
+    let page = render(&build(&[&run], &args), &args, august(3));
+    assert!(page.contains("No GPS track for this session."));
+    assert!(!page.contains("data-track"));
+}
+
+#[test]
 fn route_frame_uses_one_scale_for_both_axes() {
     let square = [(0.0, 0.0), (1000.0, 0.0), (1000.0, 1000.0), (0.0, 1000.0)];
     let frame = Frame::fit(&square, (320.0, 220.0), 20.0).unwrap();

@@ -1,0 +1,53 @@
+#map-toggle {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+#map-toggle[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--page);
+}
+
+/* Isolated, so Leaflet's high z-indexes stay under the sticky nav. */
+.map-host {
+  display: none;
+  position: relative;
+  isolation: isolate;
+  height: 300px;
+  border-radius: 6px;
+  background: var(--page);
+}
+
+.overview-map .map-host {
+  height: 460px;
+}
+
+/* The credit is required, so it wraps rather than being cut off. */
+.map-host .leaflet-control-attribution {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.leaflet-tooltip.route-tip {
+  white-space: pre-line;
+}
+
+@media screen {
+  body.map-on .has-map > .map-host {
+    display: block;
+  }
+
+  body.map-on .has-map > svg.map,
+  body.map-on .drawing-only {
+    display: none;
+  }
+
+  body.map-on .session-map.has-map {
+    flex-basis: 440px;
+  }
+}

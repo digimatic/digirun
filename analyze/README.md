@@ -64,6 +64,7 @@ ignored as GPS noise.
 | `--cadence-stats` | also report cadence mean + stdev (strides/min) |
 | `--min-pass` / `--smooth` | detail table: shortest pass, and cadence smoothing (default 20 s / 10 s) |
 | `--html PATH` | also write the metrics as one self-contained HTML page with charts, whatever `--show` picks |
+| `--map` | add a satellite map to the HTML report, with a button on the page to turn it on and off (`analyze.sh` does this unless given `--no-map` or `DIGIRUN_MAP=0`) |
 | `--show` | tables to print: `activities,weekly,overall` (default), `detail`, `summary`, `progress`, `zones`, `fitness`, `efforts`, or `all` |
 | `--hr-max` | maximum heart rate in bpm, needed for HR zones, TRIMP and pace in zone 3; never guessed |
 | `--report-dir` | where the CSVs are written (default `./runs/analysis`) |
@@ -126,6 +127,22 @@ The page follows `--start/--end`, `--days`, `--type` and `--activity`. It loads
 nothing from the network and holds no latitude or longitude. Route drawings have a
 scale but no street map, though their shapes and the activity names can still show
 where you run, so treat the page as private.
+
+### Satellite map
+
+`--map` adds a satellite map to the page, with a **Satellite map** button to turn
+it on and off. It starts on and the page remembers your choice. When on, the route
+overview and expanded sessions show the track over imagery, and the printed page
+keeps the drawings. `./analyze.sh` passes `--map` unless given `--no-map` or
+`DIGIRUN_MAP=0`.
+
+With `--map`, the page holds your GPS positions, so don't share it. While the map
+is on, including as soon as the page opens, your browser fetches tiles from EOX,
+which can see the area you're viewing.
+The imagery is [EOxCloudless](https://cloudless.eox.at) 2025, which needs no account
+and is free for non-commercial use under CC BY-NC-SA 4.0. It's about 10 m per pixel,
+so it shows the landscape rather than individual paths. Leaflet 1.9.4 is embedded
+from `src/vendor/leaflet/`.
 
 ## Tables and range
 

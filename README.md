@@ -25,7 +25,8 @@ prints the report, every run/walk pass of the last 7 days, weekly progress over 
 last 8 weeks, and this week against the previous 4. `--full` swaps the last two for
 every metric table over all history: progress, HR zones, fitness and best efforts.
 Every run also writes `runs/analysis/report.html`, one page with charts and tables
-that works offline; `--open` opens it when the run ends.
+that also works offline, apart from its satellite map; `--open` opens it when the run
+ends. `--no-map`, or `DIGIRUN_MAP=0`, leaves the map and your GPS positions out.
 `DIGIRUN_OUT` and `DIGIRUN_INTERVAL` override the data directory and
 the interval, and `DIGIRUN_HR_MAX` adds HR load to the weekly summary. Settings can
 go in a `.env` file, which is gitignored (see [`.env.example`](.env.example)); a

@@ -1,7 +1,8 @@
 //! Route drawings for the HTML report.
 //!
 //! Tracks are written as drawing coordinates fitted to each picture, so the page
-//! holds the shape and scale of a route but no latitude or longitude.
+//! holds the shape and scale of a route but no latitude or longitude. Only --map
+//! adds real positions, for the satellite maps.
 
 use std::collections::BTreeMap;
 
@@ -17,6 +18,8 @@ const METRES_PER_DEGREE: f64 = 111_320.0;
 const MIN_STEP_PX: f64 = 1.0;
 /// A smaller track still gets a readable scale.
 const MIN_SPAN_M: f64 = 50.0;
+/// How closely a satellite map follows the track, which also sets the file size.
+const MAP_STEP_M: f64 = 5.0;
 /// A route starting further from the others would shrink them all to a dot.
 const OVERVIEW_RADIUS_M: f64 = 15_000.0;
 
@@ -120,6 +123,60 @@ fn scale_bar(frame: &Frame, size: (f64, f64)) -> String {
     )
 }
 
+/// `[[lat,lon],...]`, leaving out points within `MAP_STEP_M` of the last one.
+fn positions_json(points: &[Point], cos_lat: f64) -> String {
+    let located: Vec<&Point> = points.iter().filter(|p| has_position(p)).collect();
+    let mut kept: Vec<String> = Vec::new();
+    let mut last: Option<(f64, f64)> = None;
+    for (i, point) in located.iter().enumerate() {
+        let here = metres(point, cos_lat);
+        let far_enough = last.is_none_or(|(x, y)| (here.0 - x).hypot(here.1 - y) >= MAP_STEP_M);
+        if far_enough || i + 1 == located.len() {
+            kept.push(format!("[{:.5},{:.5}]", point.lat, point.lon));
+            last = Some(here);
+        }
+    }
+    format!("[{}]", kept.join(","))
+}
+
+fn json_string(value: &str) -> String {
+    let mut out = String::from("\"");
+    for c in value.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The element a satellite map of this session is made in: `[[kind,points],...]`,
+/// where the kind is 0 for a walk, 1 for a run and 2 without passes.
+fn session_map_host(activity: &Activity, passes: &[Pass], cos_lat: f64) -> String {
+    let parts: Vec<String> = if passes.is_empty() {
+        vec![format!("[2,{}]", positions_json(&activity.points, cos_lat))]
+    } else {
+        passes
+            .iter()
+            .map(|pass| {
+                format!(
+                    "[{},{}]",
+                    (pass.class == RUN) as u8,
+                    positions_json(&activity.points[pass.start..=pass.end], cos_lat)
+                )
+            })
+            .collect()
+    };
+    format!(
+        "<div class=\"map-host\" data-track=\"[{}]\"></div>",
+        parts.join(",")
+    )
+}
+
 fn svg(size: (f64, f64), label: &str, body: &str) -> String {
     format!(
         "<svg class=\"map\" viewBox=\"0 0 {} {}\" role=\"img\" aria-label=\"{}\">\n{body}</svg>\n",
@@ -139,7 +196,7 @@ fn located_metres(activity: &Activity, cos_lat: f64) -> Vec<(f64, f64)> {
 }
 
 /// A session's track, coloured by run and walk, with its start marked.
-pub(crate) fn session_map(activity: &Activity, passes: &[Pass]) -> String {
+pub(crate) fn session_map(activity: &Activity, passes: &[Pass], with_map: bool) -> String {
     let drawing = cos_lat_of(activity).and_then(|cos_lat| {
         let located = located_metres(activity, cos_lat);
         let frame = Frame::fit(&located, SESSION_SIZE, PAD)?;
@@ -164,9 +221,13 @@ pub(crate) fn session_map(activity: &Activity, passes: &[Pass]) -> String {
         body.push_str(&scale_bar(&frame, SESSION_SIZE));
         Some(svg(SESSION_SIZE, "Route of this session", &body))
     });
+    let (has_map, host) = match cos_lat_of(activity).filter(|_| with_map) {
+        Some(cos_lat) => (" has-map", session_map_host(activity, passes, cos_lat)),
+        None => ("", String::new()),
+    };
     match drawing {
         Some(drawing) => format!(
-            "<div class=\"session-map\">{drawing}<div class=\"legend\">\
+            "<div class=\"session-map{has_map}\">{drawing}{host}<div class=\"legend\">\
              <span class=\"entry\"><span class=\"stroke s1\"></span>Run</span>\
              <span class=\"entry\"><span class=\"stroke s2\"></span>Walk</span>\
              <span class=\"entry\"><span class=\"key start-key\"></span>Start</span></div></div>"
@@ -239,7 +300,7 @@ fn median(mut values: Vec<f64>) -> f64 {
 }
 
 /// All the routes on one picture, leaving out any that start far from the rest.
-fn overview_map(routes: &[Route], colours: &[(usize, &'static str)]) -> String {
+fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: bool) -> String {
     let starts: Vec<Point> = routes
         .iter()
         .filter_map(|r| r.newest().points.iter().find(|p| has_position(p)).cloned())
@@ -314,14 +375,44 @@ fn overview_map(routes: &[Route], colours: &[(usize, &'static str)]) -> String {
     let left_out = routes.len() - shown.len();
     let note = if left_out > 0 {
         format!(
-            "<p class=\"note\">{left_out} further away than {:.0} km left out here, but shown below.</p>",
+            "<p class=\"note drawing-only\">{left_out} further away than {:.0} km left out here, but shown below.</p>",
             OVERVIEW_RADIUS_M / 1000.0
         )
     } else {
         String::new()
     };
+    // The least used go first here too. A faraway route is on the map to pan to,
+    // but the map starts on the others.
+    let (has_map, host) = if with_map {
+        let items: Vec<String> = routes
+            .iter()
+            .rev()
+            .map(|route| {
+                format!(
+                    "{{\"tip\":{},\"mark\":\"{}\",\"near\":{},\"track\":{}}}",
+                    json_string(&format!(
+                        "{}\n{}",
+                        route_label(Some(route.index)),
+                        route.summary()
+                    )),
+                    route.colour(colours),
+                    near(&route),
+                    positions_json(&route.newest().points, cos_lat)
+                )
+            })
+            .collect();
+        (
+            " has-map",
+            format!(
+                "<div class=\"map-host\" data-routes=\"{}\"></div>",
+                esc(&format!("[{}]", items.join(",")))
+            ),
+        )
+    } else {
+        ("", String::new())
+    };
     format!(
-        "<figure class=\"chart overview-map\"><div class=\"legend\">{entries}{others}</div>{}{note}</figure>\n",
+        "<figure class=\"chart overview-map{has_map}\"><div class=\"legend\">{entries}{others}</div>{}{host}{note}</figure>\n",
         svg(OVERVIEW_SIZE, "All routes", &body)
     )
 }
@@ -352,14 +443,18 @@ fn route_card(route: &Route, colours: &[(usize, &'static str)]) -> Option<String
 }
 
 /// The overview and a card for each route, for the sessions of one range.
-pub(crate) fn routes_section(sessions: &[&Session], colours: &[(usize, &'static str)]) -> String {
+pub(crate) fn routes_section(
+    sessions: &[&Session],
+    colours: &[(usize, &'static str)],
+    with_map: bool,
+) -> String {
     let routes = routes_of(sessions);
     let no_track = sessions.iter().filter(|s| s.route.is_none()).count();
     let mut out = String::new();
     if routes.is_empty() {
         out.push_str("<p class=\"note\">No GPS tracks in this range.</p>\n");
     } else {
-        out.push_str(&overview_map(&routes, colours));
+        out.push_str(&overview_map(&routes, colours, with_map));
         out.push_str("<div class=\"route-cards\">\n");
         for route in &routes {
             out.extend(route_card(route, colours));

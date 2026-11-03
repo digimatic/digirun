@@ -339,11 +339,11 @@ svg .z5 {
   --mark: var(--z5);
 }
 
-svg path {
+.plot svg path {
   fill: var(--mark);
 }
 
-svg path.line {
+.plot svg path.line {
   fill: none;
   stroke: var(--mark);
   stroke-width: 2;
@@ -351,7 +351,7 @@ svg path.line {
   stroke-linecap: round;
 }
 
-svg path.baseline-line {
+.plot svg path.baseline-line {
   fill: none;
   stroke: var(--ink-2);
   stroke-width: 2;
@@ -654,6 +654,11 @@ svg .scale {
 .start-key {
   margin-right: 0;
   --key: var(--ink);
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
 }
 
 :focus-visible {
