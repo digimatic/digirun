@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Local settings (personal)
+.env
+
 # Downloaded data (personal)
 runs/
 

@@ -14,6 +14,7 @@ pub mod csv;
 pub mod csvout;
 pub mod dt;
 pub mod load;
+pub mod metrics;
 pub mod model;
 pub mod parse;
 pub mod passes;
@@ -112,6 +113,9 @@ pub fn run(args: &Args) -> i32 {
         Vec::new()
     };
 
+    let reference = args.end.unwrap_or_else(dt::Date::today);
+    let metrics = args.show.metrics().then(|| metrics::build(&kept, args));
+
     let mut notes: Vec<String> = Vec::new();
     let range = match (args.start, args.end) {
         (Some(s), Some(e)) => Some(format!("{s} to {e}")),
@@ -169,6 +173,9 @@ pub fn run(args: &Args) -> i32 {
     if args.cadence_stats && args.show.segments() {
         notes.push("Cadence columns are mean + stdev in strides/min".to_string());
     }
+    if let Some(bpm) = args.hr_max.filter(|_| args.show.metrics()) {
+        notes.push(format!("HR max: {bpm} bpm"));
+    }
     if args.show.detail {
         notes.push(format!(
             "Passes: cadence median over {}s, passes under {}s join a neighbour",
@@ -188,6 +195,9 @@ pub fn run(args: &Args) -> i32 {
             report::print_detail(&detail);
         }
     }
+    if let Some(metrics) = &metrics {
+        report::print_metrics(metrics, args, reference);
+    }
     if !loaded.skipped.is_empty() {
         println!();
         println!("Skipped (no trackpoints): {}", loaded.skipped.join(", "));
@@ -203,6 +213,12 @@ pub fn run(args: &Args) -> i32 {
         }
         if !detail.is_empty() {
             if let Err(error) = csvout::write_passes(&report_dir, &detail) {
+                eprintln!("error: {error}");
+                return 1;
+            }
+        }
+        if let Some(metrics) = &metrics {
+            if let Err(error) = csvout::write_metrics(&report_dir, metrics, args) {
                 eprintln!("error: {error}");
                 return 1;
             }

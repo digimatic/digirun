@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import re
 import sys
@@ -154,7 +155,7 @@ def summarize(activity: dict) -> dict:
         "moving_time": _fmt_hhmmss(moving) if moving else "",
         "avg_pace_s_per_km": pace if pace is not None else "",
         "elevation_gain_m": activity.get("elevationGain") or "",
-        "avg_hr": activity.get("avgHR") or "",
+        "avg_hr": activity.get("averageHR") or "",
         "max_hr": activity.get("maxHR") or "",
         "calories": activity.get("calories") or "",
     }
@@ -184,6 +185,102 @@ def write_summary(path: Path, rows: dict[str, dict]) -> None:
         writer.writeheader()
         for row in ordered:
             writer.writerow(row)
+
+
+def _first_hr_zones(zones: list[dict] | None) -> dict:
+    """The zones for running, else the default profile, else whichever comes first."""
+    rows = zones or []
+    for sport in ("RUNNING", "DEFAULT"):
+        for row in rows:
+            if row.get("sport") == sport:
+                return row
+    return rows[0] if rows else {}
+
+
+def _weight_kg(grams: float | None) -> float | None:
+    """Garmin keeps the profile weight in grams."""
+    return round(grams / 1000.0, 1) if grams else None
+
+
+def extract_profile(zones: list[dict] | None, user: dict | None, metrics: list[dict] | None,
+                    resting: dict | None) -> dict:
+    """Pick the training fields from Garmin's responses.
+
+    This is an explicit list on purpose: the responses also hold the birth date,
+    home location and other details that have no use here and should not be saved.
+    """
+    hr = _first_hr_zones(zones)
+    data = (user or {}).get("userData") or {}
+    generic = ((metrics or [{}])[0] or {}).get("generic") or {}
+    resting_rows = (((resting or {}).get("allMetrics") or {}).get("metricsMap") or {}).get(
+        "WELLNESS_RESTING_HEART_RATE") or [{}]
+    return {
+        "max_hr_setting": hr.get("maxHeartRateUsed"),
+        "resting_hr_setting": hr.get("restingHeartRateUsed"),
+        "resting_hr_today": resting_rows[0].get("value"),
+        "lactate_threshold_hr": hr.get("lactateThresholdHeartRateUsed") or data.get("lactateThresholdHeartRate"),
+        "zone_method": hr.get("trainingMethod"),
+        "zone_floors": [hr[f"zone{i}Floor"] for i in range(1, 6) if f"zone{i}Floor" in hr],
+        "weight_kg": _weight_kg(data.get("weight")),
+        "height_cm": data.get("height"),
+        "vo2max_running": generic.get("vo2MaxPreciseValue") or data.get("vo2MaxRunning"),
+        "fitness_age": generic.get("fitnessAge"),
+    }
+
+
+def recorded_max_hr(summary_path: Path, top: int = 3) -> list[tuple[int, str]]:
+    """The highest max HR recorded on runs in summary.csv, as (bpm, date)."""
+    rows = []
+    for row in load_summary(summary_path).values():
+        if row.get("type") in RUNS_TYPES and row.get("max_hr"):
+            rows.append((int(float(row["max_hr"])), row.get("date", "")))
+    return sorted(rows, reverse=True)[:top]
+
+
+def _ask(label: str, call):
+    """One Garmin call; a failure blanks its fields rather than losing the others."""
+    try:
+        return call()
+    except (GarminConnectConnectionError, GarminConnectTooManyRequestsError) as e:
+        print(f"  ! {label}: {e}", file=sys.stderr)
+        return None
+
+
+def run_profile(client: Garmin, out_dir: Path) -> int:
+    """Print the training fields of the Garmin profile and save them as profile.json."""
+    today = date.today().isoformat()
+    profile = extract_profile(
+        _ask("heart rate zones", client.get_heart_rate_zones),
+        _ask("user profile", client.get_user_profile),
+        _ask("max metrics", lambda: client.get_max_metrics(today)),
+        _ask("resting heart rate", lambda: client.get_rhr_day(today)),
+    )
+    labels = {
+        "max_hr_setting": "Max HR (Garmin setting)",
+        "resting_hr_setting": "Resting HR (Garmin setting)",
+        "resting_hr_today": "Resting HR (today)",
+        "lactate_threshold_hr": "Lactate threshold HR",
+        "zone_method": "Zone method",
+        "zone_floors": "Zone floors",
+        "weight_kg": "Weight (kg)",
+        "height_cm": "Height (cm)",
+        "vo2max_running": "VO2 max (running)",
+        "fitness_age": "Fitness age",
+    }
+    for key, label in labels.items():
+        value = profile.get(key)
+        print(f"{label:<28} {value if value not in (None, []) else '-'}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    recorded = recorded_max_hr(out_dir / "summary.csv")
+    if recorded:
+        shown = ", ".join(f"{bpm} ({day})" for bpm, day in recorded)
+        print(f"{'Highest recorded on runs':<28} {shown}")
+
+    path = out_dir / "profile.json"
+    path.write_text(json.dumps({"fetched": today, **profile}, indent=2) + "\n", encoding="utf-8")
+    print(f"\nSaved {path}. Zones use DIGIRUN_HR_MAX from .env, which is never set for you.")
+    return 0
 
 
 def output_path(out_dir: Path, activity: dict, fmt: str) -> Path:
@@ -224,6 +321,9 @@ def main(argv: list[str] | None = None) -> int:
     except GarminConnectConnectionError as e:
         print(f"connection error: {e}", file=sys.stderr)
         return 1
+
+    if args.profile:
+        return run_profile(client, Path(args.out).expanduser())
 
     start, end = resolve_date_range(args)
     server_type, client_filter = _type_filter(args)
@@ -297,6 +397,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     out = p.add_argument_group("output")
     out.add_argument("--out", default="./runs", help="output directory (default: ./runs)")
+    out.add_argument("--profile", action="store_true",
+                     help="print max HR, resting HR, weight, VO2 max and so on, and save them "
+                          "as profile.json in --out, instead of downloading activities")
 
     auth = p.add_argument_group("authentication")
     auth.add_argument("--tokenstore", default=None,

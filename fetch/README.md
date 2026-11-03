@@ -53,6 +53,7 @@ uv run --project fetch garmin-runs --type trail --format gpx --out ./trails
 | `--type` | `runs` (running+trail, default), `all`, or a single type (`running`, `trail`, `cycling`, `swimming`, …) |
 | `--format` | Comma-separated: `gpx,tcx,kml,csv,original` (default `gpx`) |
 | `--out` | Output directory (default `./runs`) |
+| `--profile` | Print max HR, resting HR, weight, height, VO2 max and fitness age, and save them as `profile.json` in `--out`, instead of downloading activities |
 | `--tokenstore` | Token cache path (default `~/.garminconnect` or `$GARMINTOKENS`) |
 | `--cn` | Use Garmin China (garmin.cn) endpoints |
 

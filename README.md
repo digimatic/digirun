@@ -21,8 +21,15 @@ export GARMIN_EMAIL=you@example.com   # the password is prompted for, once
 ```
 
 `./analyze.sh` fetches at most once an hour (`--force` to fetch anyway), then
-prints the report and every run/walk pass of the last 7 days. `DIGIRUN_OUT` and
-`DIGIRUN_INTERVAL` override the data directory and the interval.
+prints the report, every run/walk pass of the last 7 days, and this week against
+the previous 4. `DIGIRUN_OUT` and `DIGIRUN_INTERVAL` override the data directory and
+the interval, and `DIGIRUN_HR_MAX` adds HR load to the weekly summary. Settings can
+go in a `.env` file, which is gitignored (see [`.env.example`](.env.example)); a
+variable set in the shell wins over it.
+
+`uv run --project fetch garmin-runs --profile` prints your max HR setting, resting
+HR, weight, VO2 max and fitness age from Garmin, next to the highest HR recorded on
+your runs, and saves them as `runs/profile.json`.
 
 ## License
 

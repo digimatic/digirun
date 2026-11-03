@@ -17,12 +17,23 @@ pub const DEFAULT_GAP_S: i64 = 60; // a longer pause ends the current window
 pub const DEFAULT_CADENCE_THRESHOLD: i64 = 65; // strides/min; at or above this is a run
 pub const DEFAULT_PACE_THRESHOLD: i64 = 540; // s/km; faster than this is a run
 pub const AMBIGUOUS_CADENCE: (i64, i64) = (61, 71); // hybrid resolves this band with the pace threshold
-pub const DEFAULT_TYPES: &str = "running,trail,walking";
+pub const DEFAULT_TYPES: &str = "running,trail";
 pub const DEFAULT_MIN_PASS_S: i64 = 20; // shorter passes are absorbed into a neighbour
 pub const DEFAULT_SMOOTH_S: i64 = 10; // rolling-median width for cadence in the detail table
 
 pub const METHODS: [&str; 4] = ["hybrid", "cadence", "pace", "lap"];
-pub const SHOW_TABLES: [&str; 5] = ["activities", "weekly", "overall", "detail", "all"];
+pub const SHOW_TABLES: [&str; 10] = [
+    "activities",
+    "weekly",
+    "overall",
+    "detail",
+    "summary",
+    "progress",
+    "zones",
+    "fitness",
+    "efforts",
+    "all",
+];
 
 /// Which report tables to print.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +43,16 @@ pub struct Tables {
     pub overall: bool,
     /// Every run/walk pass, split on cadence (src/passes.rs).
     pub detail: bool,
+    /// This week against the previous four (src/metrics.rs, like the rest below).
+    pub summary: bool,
+    /// Weekly volume and the longest continuous run.
+    pub progress: bool,
+    /// Weekly time in HR zones, TRIMP and acute:chronic load.
+    pub zones: bool,
+    /// Efficiency, decoupling, HR recovery and grade-adjusted pace, per route.
+    pub fitness: bool,
+    /// Best efforts and race predictions.
+    pub efforts: bool,
 }
 
 impl Tables {
@@ -41,6 +62,11 @@ impl Tables {
             weekly: false,
             overall: false,
             detail: false,
+            summary: false,
+            progress: false,
+            zones: false,
+            fitness: false,
+            efforts: false,
         }
     }
 
@@ -50,6 +76,11 @@ impl Tables {
             weekly: true,
             overall: true,
             detail: true,
+            summary: true,
+            progress: true,
+            zones: true,
+            fitness: true,
+            efforts: true,
         }
     }
 
@@ -57,14 +88,21 @@ impl Tables {
     pub fn segments(&self) -> bool {
         self.activities || self.weekly || self.overall
     }
+
+    /// Any of the tables built from the session metrics.
+    pub fn metrics(&self) -> bool {
+        self.summary || self.progress || self.zones || self.fitness || self.efforts
+    }
 }
 
 impl Default for Tables {
-    /// Everything but the detail, which is long.
+    /// The segment tables; the others are long or answer a narrower question.
     fn default() -> Tables {
         Tables {
-            detail: false,
-            ..Tables::all()
+            activities: true,
+            weekly: true,
+            overall: true,
+            ..Tables::none()
         }
     }
 }
@@ -119,6 +157,8 @@ pub struct Args {
     pub activities: Option<std::collections::BTreeSet<String>>,
     pub min_pass: i64,
     pub smooth: i64,
+    /// Maximum heart rate; HR zones and TRIMP need it, and it is never guessed.
+    pub hr_max: Option<i64>,
 }
 
 /// Worker threads used to parse the files.
@@ -165,6 +205,7 @@ impl Default for Args {
             activities: None,
             min_pass: DEFAULT_MIN_PASS_S,
             smooth: DEFAULT_SMOOTH_S,
+            hr_max: None,
         }
     }
 }
@@ -420,13 +461,21 @@ fn groups() -> Vec<Group> {
             ],
         },
         Group {
+            title: "metrics".to_string(),
+            actions: vec![Action::new(
+                &["--hr-max"],
+                "BPM",
+                "maximum heart rate, needed for HR zones, TRIMP and pace in zone 3".to_string(),
+            )],
+        },
+        Group {
             title: "output".to_string(),
             actions: vec![
                 Action::new(
                     &["--report-dir"],
                     "REPORT_DIR",
                     format!(
-                        "where analysis.csv and segments.csv (passes.csv with --show detail) are written (default: {DEFAULT_REPORT_DIR})"
+                        "where analysis.csv and segments.csv (passes.csv with --show detail, sessions.csv and weeks.csv with the metric tables) are written (default: {DEFAULT_REPORT_DIR})"
                     ),
                 ),
                 Action::new(
@@ -437,7 +486,7 @@ fn groups() -> Vec<Group> {
                 Action::new(
                     &["--show"],
                     "TABLES",
-                    "report tables to print: 'all' or comma-separated activities,weekly,overall,detail (default: activities,weekly,overall); detail lists every run/walk pass, split on cadence, with its stats".to_string(),
+                    "report tables to print: 'all' or comma-separated activities,weekly,overall,detail,summary,progress,zones,fitness,efforts (default: activities,weekly,overall); detail lists every run/walk pass, split on cadence, with its stats".to_string(),
                 ),
                 Action::new(&["--no-csv"], "", "print the report only".to_string()),
             ],
@@ -713,6 +762,11 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                         "weekly" => show.weekly = true,
                         "overall" => show.overall = true,
                         "detail" => show.detail = true,
+                        "summary" => show.summary = true,
+                        "progress" => show.progress = true,
+                        "zones" => show.zones = true,
+                        "fitness" => show.fitness = true,
+                        "efforts" => show.efforts = true,
                         "all" => show = Tables::all(),
                         _ => {
                             return Err(CliError::argument(format!(
@@ -765,6 +819,21 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                         quoted(&raw)
                     ))
                 })?;
+            }
+            "--hr-max" => {
+                let raw = value(&mut i)?;
+                let bpm = raw.parse::<i64>().map_err(|_| {
+                    CliError::argument(format!(
+                        "argument --hr-max: invalid int value: {}",
+                        quoted(&raw)
+                    ))
+                })?;
+                if !(100..=250).contains(&bpm) {
+                    return Err(CliError::argument(format!(
+                        "argument --hr-max: must be between 100 and 250, got {bpm}"
+                    )));
+                }
+                args.hr_max = Some(bpm);
             }
             other => {
                 return Err(CliError::argument(format!(

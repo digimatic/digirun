@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::analyze::{round, stats};
 use crate::args::Args;
 use crate::csv::Writer;
+use crate::metrics::{sessions_in_range, Metrics};
 use crate::model::{Activity, Segment};
 use crate::passes::Pass;
 use crate::report::py_num;
@@ -210,7 +211,7 @@ pub fn write_passes(
                 py_num(s.time_s),
                 py_num(s.stopped_s),
                 py_num(s.distance_m),
-                num(s.pace),
+                num(s.pace.filter(|_| s.pace_reliable)),
                 num(s.pace_sd),
                 num(s.pace_min),
                 num(s.pace_max),
@@ -253,4 +254,117 @@ fn display(path: &Path) -> String {
 
 fn write_file(path: &Path, contents: &str) -> Result<(), String> {
     std::fs::write(path, contents).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+pub const SESSION_FIELDS: [&str; 20] = [
+    "date",
+    "activity_id",
+    "name",
+    "type",
+    "route",
+    "run_s",
+    "walk_s",
+    "run_m",
+    "walk_m",
+    "longest_run_s",
+    "run_pace_s_per_km",
+    "grade_adjusted_pace_s_per_km",
+    "run_hr",
+    "efficiency",
+    "decoupling_pct",
+    "zone3_pace_s_per_km",
+    "hr_recovery_60s",
+    "elevation_gain_m",
+    "trimp",
+    "km",
+];
+
+pub const WEEK_FIELDS: [&str; 19] = [
+    "week",
+    "monday",
+    "sessions",
+    "longest_run_s",
+    "run_s",
+    "walk_s",
+    "km",
+    "km_previous_4_weeks",
+    "trimp",
+    "run_zone1_s",
+    "run_zone2_s",
+    "run_zone3_s",
+    "run_zone4_s",
+    "run_zone5_s",
+    "all_zone1_s",
+    "all_zone2_s",
+    "all_zone3_s",
+    "all_zone4_s",
+    "all_zone5_s",
+];
+
+/// Write `sessions.csv` and `weeks.csv`, narrowed to --start/--end.
+pub fn write_metrics(report_dir: &Path, metrics: &Metrics, args: &Args) -> Result<(), String> {
+    std::fs::create_dir_all(report_dir).map_err(|e| format!("{}: {e}", report_dir.display()))?;
+    let num = |value: Option<f64>, digits: usize| {
+        value.map(|v| py_num(round(v, digits))).unwrap_or_default()
+    };
+    let fields = |names: &[&str]| names.iter().map(|f| f.to_string()).collect::<Vec<_>>();
+
+    let mut writer = Writer::new();
+    writer.row(&fields(&SESSION_FIELDS));
+    for s in sessions_in_range(metrics, args) {
+        writer.row(&[
+            s.activity.date.isoformat(),
+            s.activity.activity_id.clone(),
+            s.activity.name.clone(),
+            s.activity.r#type.clone(),
+            s.route.map(|r| format!("R{}", r + 1)).unwrap_or_default(),
+            py_num(round(s.run_s, 1)),
+            py_num(round(s.walk_s, 1)),
+            py_num(round(s.run_m, 1)),
+            py_num(round(s.walk_m, 1)),
+            py_num(round(s.longest_run_s, 1)),
+            num(s.run_pace(), 1),
+            num(s.grade_adjusted_pace, 1),
+            num(s.run_hr, 1),
+            num(s.efficiency, 3),
+            num(s.decoupling, 1),
+            num(s.zone3_pace, 1),
+            num(s.recovery, 1),
+            num(s.elev_gain, 1),
+            num(s.trimp, 1),
+            py_num(round(s.km(), 2)),
+        ]);
+    }
+    let sessions_path = report_dir.join("sessions.csv");
+    write_file(&sessions_path, writer.contents())?;
+
+    let mut writer = Writer::new();
+    writer.row(&fields(&WEEK_FIELDS));
+    for week in metrics.weeks.iter().filter(|w| w.in_range(args)) {
+        let mut row = vec![
+            week.label(),
+            week.monday.isoformat(),
+            week.sessions.to_string(),
+            py_num(round(week.longest_run_s, 1)),
+            py_num(round(week.run_s, 1)),
+            py_num(round(week.walk_s, 1)),
+            py_num(round(week.km, 2)),
+            num(week.km_baseline, 2),
+            num(week.trimp, 1),
+        ];
+        for zones in [&week.zones_run, &week.zones_all] {
+            row.extend(zones.iter().map(|s| py_num(round(*s, 1))));
+        }
+        writer.row(&row);
+    }
+    let weeks_path = report_dir.join("weeks.csv");
+    write_file(&weeks_path, writer.contents())?;
+
+    println!();
+    println!(
+        "Wrote {} and {}",
+        display(&sessions_path),
+        display(&weeks_path)
+    );
+    Ok(())
 }

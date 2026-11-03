@@ -49,7 +49,7 @@ ignored as GPS noise.
 | --- | --- |
 | `--out` | directory of downloaded files (default `./runs`) |
 | `--start` / `--end` | restrict to a date range |
-| `--type` | activity types to analyze: `all`, or comma-separated keys (default `running,trail,walking`) |
+| `--type` | activity types to analyze: `all`, or comma-separated keys (default `running,trail`, so plain walks are left out unless you add `walking`) |
 | `--days N` | only the last N days, up to `--end` or today |
 | `--activity` | only these comma-separated activity ids |
 | `--jobs` | worker threads used to parse the files (default `min(cpu_count, 8)`; `1` runs single-threaded) |
@@ -63,7 +63,8 @@ ignored as GPS noise.
 | `--min-pace` | exclude segments faster than this from the stats, e.g. `3:00` (default: none) |
 | `--cadence-stats` | also report cadence mean + stdev (strides/min) |
 | `--min-pass` / `--smooth` | detail table: shortest pass, and cadence smoothing (default 20 s / 10 s) |
-| `--show` | tables to print: `activities,weekly,overall` (default), `detail`, or `all` |
+| `--show` | tables to print: `activities,weekly,overall` (default), `detail`, `summary`, `progress`, `zones`, `fitness`, `efforts`, or `all` |
+| `--hr-max` | maximum heart rate in bpm, needed for HR zones, TRIMP and pace in zone 3; never guessed |
 | `--report-dir` | where the CSVs are written (default `./runs/analysis`) |
 | `--no-csv` | print the report only |
 
@@ -97,6 +98,8 @@ activities the pool is skipped. The 255 activities here take 0.16 s with 8 threa
 - `runs/analysis/segments.csv` — one row per segment: `activity_id, date, time,
   class, pace_s_per_km, cadence, distance_m, window_s`
 - `runs/analysis/passes.csv` — one row per run/walk pass, with `--show detail`
+- `runs/analysis/sessions.csv` and `weeks.csv` — one row per session and per ISO
+  week, with any of `summary`, `progress`, `zones`, `fitness` or `efforts`
 
 Example (this data, with `--max-pace 15:00 --min-pace 3:00 --cadence-stats`):
 
@@ -104,8 +107,8 @@ Example (this data, with `--max-pace 15:00 --min-pace 3:00 --cadence-stats`):
 Overall
 class       n    time  dist km    mean     sd     min     max  share    cad     sd
 ----------------------------------------------------------------------------------
-run      1965 17:37:22   144.55    7:19   0:57    3:21   12:18  26.8%   76.8    3.7
-walk     5356 48:11:23   252.50   11:27   1:28    5:24   15:00  73.2%   53.4    5.7
+run      1882 16:55:55   137.36    7:24   0:52    4:44   12:18  46.6%   76.8    3.6
+walk     2157 19:22:09   106.61   10:54   1:22    5:27   14:57  53.4%   54.5    3.3
 ```
 
 Pace values in the CSVs are seconds per kilometre, matching `summary.csv`.
@@ -113,8 +116,8 @@ Pace values in the CSVs are seconds per kilometre, matching `summary.csv`.
 ## Tables and range
 
 `--show` picks the tables: `activities`, `weekly`, `overall` (the default is these
-three), `detail`, or `all`. They all cover the same range, and every table is
-narrowed by `--start/--end`, `--days N` (the last N days up to `--end` or today), and
+three), `detail`, the metric tables below, or `all`. They all cover the same range,
+and every table is narrowed by `--start/--end`, `--days N` (the last N days up to `--end` or today), and
 `--activity ID[,ID]`. Without a range, the tables cover all of time.
 
 ```bash
@@ -150,6 +153,56 @@ about) are left out of every stat, and the `stop` column shows how long they wer
 Passes that are outside the guard as a whole are marked `*` and left out of the totals.
 `passes.csv` in `--report-dir` holds one row per pass.
 
+Stride and pace are left blank for a pass shorter than `--window`, because GPS pace
+still lags the change of cadence there. HR drift is left blank under 5 minutes,
+where it mostly shows HR lagging the effort. Elevation is a 30 s rolling mean with a
+1 m dead-band, tuned against Garmin's gain over this data (median error 0.1 m).
+A cadence of 0 counts as missing, so a stop falls back to pace and labels as walk.
+
+## The metric tables
+
+These are calculated over all history up to `--end`, so rolling baselines can look
+back past the start of the range. `--start` and `--days` only narrow the rows.
+
+```bash
+garmin-analyze --max-pace 15:00 --min-pace 3:00 --show summary --hr-max 186
+garmin-analyze --max-pace 15:00 --min-pace 3:00 --show progress,fitness --days 90
+```
+
+| Table | Contents |
+| --- | --- |
+| `summary` | this week so far against the mean of the previous 4 weeks, plus the acute:chronic ratio |
+| `progress` | per ISO week, empty weeks included: sessions, longest continuous run, run and walk time, run share, km, km against the previous 4 weeks |
+| `zones` | per week: minutes in each HR zone (run passes and all time), Edwards TRIMP; needs `--hr-max` |
+| `fitness` | per session, grouped by route: pace, grade-adjusted pace, HR, efficiency, decoupling, pace in zone 3, HR recovery, gain |
+| `efforts` | fastest 1, 3 and 5 km, with and without walking, and predictions |
+
+How they are defined:
+
+- **HR zones:** 50-60, 60-70, 70-80, 80-90 and 90+% of `--hr-max`. Time below 50% has
+  no zone. Pass your real maximum: a top recorded value may be a sensor spike.
+- **TRIMP (Edwards):** minutes in each zone times the zone number, over all recorded
+  time including walking.
+- **Acute:chronic ratio:** the last 7 days against the mean week of the 28 days before
+  them. The acute week stays out of its own baseline, so a jump reads higher than a
+  ratio that includes it. At low volume one light week moves it a lot, so read it
+  beside the absolute values printed with it. `n/a` under 5 weeks of history.
+- **Efficiency:** run speed (m/min) divided by HR. Compare it within a route, and
+  expect it to fall as runs get longer.
+- **Decoupling:** efficiency lost from the first to the second half of the longest
+  run pass, skipping its first 5 minutes. It needs a pass of at least 20 minutes.
+- **HR recovery:** HR at the end of a run of at least 2 minutes, minus HR 60 s into the
+  walk that follows, as the session median.
+- **Routes:** tracks are reduced to ~100 m grid cells. Each joins the most similar
+  earlier route at a Jaccard overlap of 0.6 or more with that route's first track.
+- **Grade-adjusted pace:** Minetti's energy cost per `--window` window, with the grade
+  clamped to ±30%.
+- **Best efforts:** the fastest contiguous stretch, not crossing a pause longer than
+  `--gap`, and rejecting anything faster than `--min-pace`.
+- **Predictions:** Riegel (exponent 1.06) and Daniels' VDOT, from the longest effort
+  of at least 3 km, at least 90% running, in the last 90 days up to `--end` or today.
+  They come from training efforts, so a race would likely be faster.
+
 ## Behaviour notes
 
 - The mean pace in the tables and in `analysis.csv` (`mean_pace_s_per_km`) is
@@ -174,6 +227,7 @@ Passes that are outside the guard as a whole are marked `*` and left out of the 
 | `src/model.rs` | `Point`, `Activity`, `Segment`, haversine |
 | `src/analyze.rs` | classification, segmentation, stats, filters, `round` |
 | `src/passes.rs` | the detail table: cadence-split passes and their stats |
+| `src/metrics.rs` | session and week metrics: load, zones, fitness, routes, efforts |
 | `src/dt.rs` | timestamps, dates, ISO weeks |
 | `src/csv.rs` / `src/csvout.rs` | CSV writing |
 | `src/report.rs` | the console tables |

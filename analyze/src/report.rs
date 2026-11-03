@@ -5,6 +5,11 @@ use std::collections::BTreeMap;
 use crate::analyze::stats;
 use crate::analyze::{RUN, WALK};
 use crate::args::{Args, Method, AMBIGUOUS_CADENCE};
+use crate::dt::Date;
+use crate::metrics::{
+    acute_chronic, prediction_source, previous_weeks, riegel, sessions_in_range, vdot, Effort,
+    Load, Metrics, Session, EFFORT_DISTANCES_M, RUNNING_EFFORT_SHARE, ZONES,
+};
 use crate::model::{Activity, Segment, Stats};
 use crate::passes::{totals, Pass, Source};
 
@@ -385,7 +390,7 @@ pub fn print_detail(activities: &[(&Activity, Vec<Pass>)]) {
                 fmt_duration(s.start_offset_s),
                 fmt_duration(s.time_s),
                 int(s.distance_m),
-                opt(s.pace, 6, pace),
+                opt(s.pace.filter(|_| s.pace_reliable), 6, pace),
                 opt(s.pace_sd, 5, pace),
                 opt(s.pace_min, 6, pace),
                 opt(s.pace_max, 6, pace),
@@ -452,4 +457,321 @@ pub fn print_detail(activities: &[(&Activity, Vec<Pass>)]) {
 
 fn truncate(value: &str, max: usize) -> String {
     value.chars().take(max).collect()
+}
+
+/// The metric tables chosen with --show, for the range in `args`.
+pub fn print_metrics(metrics: &Metrics, args: &Args, reference: Date) {
+    if args.show.progress {
+        print_progress(metrics, args);
+    }
+    if args.show.zones {
+        print_zones(metrics, args, reference);
+    }
+    if args.show.fitness {
+        print_fitness(metrics, args);
+    }
+    if args.show.efforts {
+        print_efforts(metrics, args, reference);
+    }
+    if args.show.summary {
+        print_summary(metrics, args, reference);
+    }
+}
+
+/// `+23%`, or `-` when there is nothing to compare with.
+fn change(value: f64, baseline: Option<f64>) -> String {
+    match baseline {
+        Some(baseline) if baseline > 0.0 => {
+            format!("{:+}%", round_int((value / baseline - 1.0) * 100.0))
+        }
+        _ => "-".to_string(),
+    }
+}
+
+fn duration_or_dash(seconds: f64) -> String {
+    if seconds > 0.0 {
+        fmt_duration(seconds)
+    } else {
+        "-".to_string()
+    }
+}
+
+fn print_progress(metrics: &Metrics, args: &Args) {
+    println!();
+    println!("Progress");
+    let header = format!(
+        "{:<10} {:>4} {:>8} {:>8} {:>8} {:>5} {:>7} {:>6}",
+        "week", "sess", "longest", "run", "walk", "run%", "km", "vs 4wk"
+    );
+    println!("{header}");
+    println!("{}", "-".repeat(header.chars().count()));
+    for week in metrics.weeks.iter().filter(|w| w.in_range(args)) {
+        println!(
+            "{:<10} {:>4} {:>8} {:>8} {:>8} {} {:>7.2} {:>6}",
+            week.label(),
+            week.sessions,
+            duration_or_dash(week.longest_run_s),
+            duration_or_dash(week.run_s),
+            duration_or_dash(week.walk_s),
+            opt(week.run_share(), 5, int),
+            week.km,
+            change(week.km, week.km_baseline)
+        );
+    }
+}
+
+fn load_line(label: &str, load: Load, unit: &str) -> String {
+    format!(
+        "{label:<7} last 7 days {:.1} {unit}, previous 4 weeks {:.1} {unit}/week, ratio {}",
+        load.acute,
+        load.baseline,
+        load.ratio
+            .map_or("n/a".to_string(), |ratio| format!("{ratio:.2}"))
+    )
+}
+
+fn km_load(metrics: &Metrics, reference: Date) -> Load {
+    let samples: Vec<(Date, f64)> = metrics
+        .sessions
+        .iter()
+        .map(|s| (s.activity.date, s.km()))
+        .collect();
+    acute_chronic(&samples, reference)
+}
+
+fn trimp_load(metrics: &Metrics, reference: Date) -> Load {
+    let samples: Vec<(Date, f64)> = metrics
+        .sessions
+        .iter()
+        .filter_map(|s| s.trimp.map(|value| (s.activity.date, value)))
+        .collect();
+    acute_chronic(&samples, reference)
+}
+
+fn print_zones(metrics: &Metrics, args: &Args, reference: Date) {
+    println!();
+    println!("HR zones (minutes)");
+    let Some(hr_max) = args.hr_max else {
+        println!(
+            "needs --hr-max: it is not guessed, because a sensor spike would shift every zone"
+        );
+        return;
+    };
+    println!("zones are 50-60, 60-70, 70-80, 80-90 and 90+% of {hr_max} bpm");
+    let header = format!(
+        "{:<10} {:>4} {:>4} {:>4} {:>4} {:>4}   {:>4} {:>4} {:>4} {:>4} {:>4} {:>6}",
+        "week", "run1", "2", "3", "4", "5", "all1", "2", "3", "4", "5", "trimp"
+    );
+    println!("{header}");
+    println!("{}", "-".repeat(header.chars().count()));
+    let minutes = |zones: &[f64; ZONES]| -> Vec<String> {
+        zones
+            .iter()
+            .map(|s| format!("{:>4}", round_int(s / 60.0)))
+            .collect()
+    };
+    for week in metrics.weeks.iter().filter(|w| w.in_range(args)) {
+        println!(
+            "{:<10} {}   {} {}",
+            week.label(),
+            minutes(&week.zones_run).join(" "),
+            minutes(&week.zones_all).join(" "),
+            opt(week.trimp, 6, int)
+        );
+    }
+    println!();
+    println!(
+        "{}",
+        load_line("TRIMP", trimp_load(metrics, reference), "pts")
+    );
+    println!("{}", load_line("Volume", km_load(metrics, reference), "km"));
+}
+
+fn route_label(route: Option<usize>) -> String {
+    route.map_or("no GPS".to_string(), |r| format!("R{}", r + 1))
+}
+
+fn mean_of(values: &[f64]) -> Option<f64> {
+    (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
+}
+
+fn print_fitness(metrics: &Metrics, args: &Args) {
+    println!();
+    println!("Fitness, by route");
+    let sessions: Vec<&Session> = sessions_in_range(metrics, args)
+        .into_iter()
+        .filter(|s| s.run_s > 0.0)
+        .collect();
+    let mut routes: Vec<Option<usize>> = sessions.iter().map(|s| s.route).collect();
+    routes.sort();
+    routes.dedup();
+    let header = format!(
+        "  {:<10} {:>7} {:>6} {:>6} {:>6} {:>4} {:>5} {:>7} {:>6} {:>6} {:>5}",
+        "date", "run", "km", "pace", "gap", "hr", "ef", "decoup%", "z3", "recov", "elev+"
+    );
+    for route in routes {
+        let rows: Vec<&&Session> = sessions.iter().filter(|s| s.route == route).collect();
+        let mut gains: Vec<f64> = rows.iter().filter_map(|s| s.elev_gain).collect();
+        gains.sort_by(f64::total_cmp);
+        let gain = gains.get(gains.len() / 2).copied();
+        println!();
+        println!(
+            "{} ({} sessions, typical gain {})",
+            route_label(route),
+            rows.len(),
+            gain.map_or("-".to_string(), |g| format!("{} m", round_int(g)))
+        );
+        println!("{header}");
+        for s in &rows {
+            println!(
+                "  {:<10} {:>7} {:>6.2} {} {} {} {} {} {} {} {}",
+                s.activity.date.isoformat(),
+                fmt_duration(s.run_s),
+                s.run_m / 1000.0,
+                opt(s.run_pace(), 6, pace),
+                opt(s.grade_adjusted_pace, 6, pace),
+                opt(s.run_hr, 4, int),
+                opt(s.efficiency, 5, |v| format!("{v:.2}")),
+                opt(s.decoupling, 7, one),
+                opt(s.zone3_pace, 6, pace),
+                opt(s.recovery, 6, int),
+                opt(s.elev_gain, 5, int),
+            );
+        }
+        let efficiency: Vec<f64> = rows.iter().filter_map(|s| s.efficiency).collect();
+        if efficiency.len() >= 6 {
+            let early = mean_of(&efficiency[..3]).unwrap_or(0.0);
+            let late = mean_of(&efficiency[efficiency.len() - 3..]).unwrap_or(0.0);
+            println!("  efficiency, first 3 sessions {early:.2}, last 3 sessions {late:.2}");
+        }
+    }
+}
+
+fn effort_cells(effort: Option<&Effort>) -> String {
+    match effort {
+        Some(e) => format!(
+            "{:>8} {:>6} {:<10} {:>4}%",
+            fmt_duration(e.time_s),
+            fmt_pace(e.pace()),
+            e.date.isoformat(),
+            round_int(e.run_share * 100.0)
+        ),
+        None => format!("{:>8} {:>6} {:<10} {:>5}", "-", "-", "-", "-"),
+    }
+}
+
+fn fastest<'e>(efforts: impl Iterator<Item = &'e Effort>) -> Option<&'e Effort> {
+    efforts.min_by(|a, b| a.time_s.total_cmp(&b.time_s))
+}
+
+fn print_efforts(metrics: &Metrics, args: &Args, reference: Date) {
+    println!();
+    println!("Best efforts");
+    let share = round_int(RUNNING_EFFORT_SHARE * 100.0);
+    let header = format!(
+        "{:<5} {:>8} {:>6} {:<10} {:>5}   {:>8} {:>6} {:<10} {:>5}",
+        "dist",
+        "any",
+        "pace",
+        "date",
+        "run",
+        format!("{share}%+run"),
+        "pace",
+        "date",
+        "run"
+    );
+    println!("{header}");
+    println!("{}", "-".repeat(header.chars().count()));
+    let sessions = sessions_in_range(metrics, args);
+    for (i, distance) in EFFORT_DISTANCES_M.iter().enumerate() {
+        let any = fastest(sessions.iter().filter_map(|s| s.efforts_any[i].as_ref()));
+        let running = fastest(
+            sessions
+                .iter()
+                .filter_map(|s| s.efforts_running[i].as_ref()),
+        );
+        println!(
+            "{:<5} {}   {}",
+            format!("{} km", round_int(distance / 1000.0)),
+            effort_cells(any),
+            effort_cells(running)
+        );
+    }
+
+    println!();
+    match prediction_source(&metrics.sessions, reference) {
+        Some(source) => {
+            println!(
+                "Predictions from {:.0} km in {} on {} (a training effort, so likely slower than a race):",
+                source.distance_m / 1000.0,
+                fmt_duration(source.time_s),
+                source.date
+            );
+            println!("  VDOT {:.1}", vdot(source.distance_m, source.time_s));
+            for target in [5000.0, 10000.0] {
+                println!(
+                    "  {:.0} km in {}",
+                    target / 1000.0,
+                    fmt_duration(riegel(source.time_s, source.distance_m, target))
+                );
+            }
+        }
+        None => println!(
+            "No predictions: they need an effort of at least 3 km, {share}% running, in the last 90 days."
+        ),
+    }
+}
+
+fn print_summary(metrics: &Metrics, args: &Args, reference: Date) {
+    let monday = reference.monday();
+    let current = metrics.weeks.iter().find(|w| w.monday == monday);
+    let baseline = previous_weeks(&metrics.weeks, monday);
+    let (year, week) = monday.isocalendar();
+
+    println!();
+    println!("This week so far ({year}-W{week:02}) against the mean of the previous 4 weeks");
+    let header = format!("{:<12} {:>8} {:>8} {:>6}", "", "week", "4 weeks", "change");
+    println!("{header}");
+    println!("{}", "-".repeat(header.chars().count()));
+    let sessions = current.map_or(0, |w| w.sessions) as f64;
+    let km = current.map_or(0.0, |w| w.km);
+    let run_s = current.map_or(0.0, |w| w.run_s);
+    let longest = current.map_or(0.0, |w| w.longest_run_s);
+    println!(
+        "{:<12} {:>8} {} {:>6}",
+        "sessions",
+        round_int(sessions),
+        opt(baseline.map(|b| b.sessions), 8, one),
+        change(sessions, baseline.map(|b| b.sessions))
+    );
+    println!(
+        "{:<12} {:>8.2} {} {:>6}",
+        "km",
+        km,
+        opt(baseline.map(|b| b.km), 8, |v| format!("{v:.2}")),
+        change(km, baseline.map(|b| b.km))
+    );
+    println!(
+        "{:<12} {:>8} {} {:>6}",
+        "run time",
+        fmt_duration(run_s),
+        opt(baseline.map(|b| b.run_s), 8, fmt_duration),
+        change(run_s, baseline.map(|b| b.run_s))
+    );
+    println!(
+        "{:<12} {:>8} {} {:>6}",
+        "longest run",
+        fmt_duration(longest),
+        opt(baseline.map(|b| b.longest_run_s), 8, fmt_duration),
+        change(longest, baseline.map(|b| b.longest_run_s))
+    );
+    println!("(the longest run row compares with the longest of those 4 weeks, not their mean)");
+    println!();
+    println!("{}", load_line("Volume", km_load(metrics, reference), "km"));
+    if args.hr_max.is_some() {
+        println!(
+            "{}",
+            load_line("TRIMP", trimp_load(metrics, reference), "pts")
+        );
+    }
 }

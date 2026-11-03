@@ -61,27 +61,27 @@ impl Date {
         civil_from_days(days_from_civil(self.year, self.month, self.day) - days)
     }
 
+    /// Days since 1970-01-01.
+    pub fn days(&self) -> i64 {
+        days_from_civil(self.year, self.month, self.day)
+    }
+
+    /// The date `days` days later.
+    pub fn plus_days(&self, days: i64) -> Date {
+        civil_from_days(self.days() + days)
+    }
+
+    /// The Monday of this date's ISO week.
+    pub fn monday(&self) -> Date {
+        self.minus_days(weekday(*self) - 1)
+    }
+
     /// `(iso_year, iso_week)`, matching `date.isocalendar()`.
     pub fn isocalendar(&self) -> (i32, u32) {
-        let days = days_from_civil(self.year, self.month, self.day);
-        // Jan 4 is always in ISO week 1 of its year.
-        let jan4 = Date {
-            year: self.year,
-            month: 1,
-            day: 4,
-        };
-        let start = days_from_civil(jan4.year, 1, 4) - (weekday(jan4) - 1);
-        let diff = days - start;
-        if diff >= 0 {
-            return (self.year, (diff / 7 + 1) as u32);
-        }
-        let prev = Date {
-            year: self.year - 1,
-            month: 1,
-            day: 4,
-        };
-        let prev_start = days_from_civil(prev.year, 1, 4) - (weekday(prev) - 1);
-        (self.year - 1, ((days - prev_start) / 7 + 1) as u32)
+        // An ISO week belongs to the year that holds its Thursday.
+        let thursday = self.monday().plus_days(3);
+        let first = days_from_civil(thursday.year, 1, 1);
+        (thursday.year, ((thursday.days() - first) / 7 + 1) as u32)
     }
 }
 

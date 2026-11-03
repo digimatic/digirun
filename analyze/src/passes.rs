@@ -49,6 +49,8 @@ pub struct PassStats {
     pub time_s: f64,
     pub distance_m: f64,
     pub pace: Option<f64>,
+    /// False for a pass shorter than `--window`, whose pace is not shown.
+    pub pace_reliable: bool,
     /// Over the `--window` sub-windows of the pass; needs two of them.
     pub pace_sd: Option<f64>,
     pub pace_min: Option<f64>,
@@ -70,15 +72,23 @@ pub struct PassStats {
     pub stopped_s: f64,
 }
 
+/// Rolling-mean width and minimum climb for elevation, tuned so session gain
+/// tracks Garmin's `elevation_gain_m` (median error 0.1 m over 69 runs).
+const ELEV_SMOOTH_S: f64 = 30.0;
+const ELEV_DEADBAND_M: f64 = 1.0;
+
+/// HR drift over a shorter pass mostly shows HR lagging the change of effort.
+const MIN_DRIFT_S: f64 = 300.0;
+
 /// An interval between point `k - 1` and point `k`.
-struct Step {
-    dt: f64,
-    dm: f64,
+pub(crate) struct Step {
+    pub(crate) dt: f64,
+    pub(crate) dm: f64,
     /// A pause longer than --gap: not counted, and it ends the pass.
-    gap: bool,
+    pub(crate) gap: bool,
 }
 
-fn steps(points: &[Point], args: &Args) -> Vec<Step> {
+pub(crate) fn steps(points: &[Point], args: &Args) -> Vec<Step> {
     let mut out = vec![Step {
         dt: 0.0,
         dm: 0.0,
@@ -106,7 +116,7 @@ fn steps(points: &[Point], args: &Args) -> Vec<Step> {
     out
 }
 
-fn median(values: &mut [f64]) -> f64 {
+pub(crate) fn median(values: &mut [f64]) -> f64 {
     values.sort_by(|a, b| a.total_cmp(b));
     let n = values.len();
     if n % 2 == 1 {
@@ -117,7 +127,7 @@ fn median(values: &mut [f64]) -> f64 {
 }
 
 /// Seconds since the first point, for each point.
-fn offsets(points: &[Point]) -> Vec<f64> {
+pub(crate) fn offsets(points: &[Point]) -> Vec<f64> {
     points
         .iter()
         .map(|p| p.time.seconds_since(&points[0].time))
@@ -136,12 +146,61 @@ fn smoothed_cadence(points: &[Point], t: &[f64], half: f64) -> Vec<Option<f64>> 
         while hi + 1 < points.len() && t[hi + 1] <= t[k] + half {
             hi += 1;
         }
-        let mut values: Vec<f64> = points[lo..=hi].iter().filter_map(|p| p.cadence).collect();
+        // A cadence of 0 is a stop, not a measurement.
+        let mut values: Vec<f64> = points[lo..=hi]
+            .iter()
+            .filter_map(|p| p.cadence)
+            .filter(|&c| c > 0.0)
+            .collect();
         out.push(if values.is_empty() {
             None
         } else {
             Some(median(&mut values))
         });
+    }
+    out
+}
+
+/// Rolling mean of altitude; None where the point itself has no altitude.
+pub(crate) fn smoothed_altitude(points: &[Point], t: &[f64]) -> Vec<Option<f64>> {
+    let half = ELEV_SMOOTH_S / 2.0;
+    let (mut lo, mut hi) = (0, 0);
+    let mut out = Vec::with_capacity(points.len());
+    for k in 0..points.len() {
+        while t[lo] < t[k] - half {
+            lo += 1;
+        }
+        while hi + 1 < points.len() && t[hi + 1] <= t[k] + half {
+            hi += 1;
+        }
+        let values: Vec<f64> = points[lo..=hi].iter().filter_map(|p| p.altitude).collect();
+        out.push(points[k].altitude.map(|_| mean(&values)));
+    }
+    out
+}
+
+/// (gain, loss) in metres credited to each step, from the smoothed altitude with
+/// a dead-band: barometer and GPS noise would otherwise add up to phantom climbing.
+pub fn climbs(points: &[Point]) -> Vec<(f64, f64)> {
+    let altitude = smoothed_altitude(points, &offsets(points));
+    let mut out = vec![(0.0, 0.0); points.len()];
+    let mut anchor: Option<f64> = None;
+    for (k, value) in altitude.iter().enumerate() {
+        let Some(value) = *value else {
+            continue;
+        };
+        let Some(previous) = anchor else {
+            anchor = Some(value);
+            continue;
+        };
+        let change = value - previous;
+        if change >= ELEV_DEADBAND_M {
+            out[k].0 = change;
+            anchor = Some(value);
+        } else if change <= -ELEV_DEADBAND_M {
+            out[k].1 = -change;
+            anchor = Some(value);
+        }
     }
     out
 }
@@ -200,8 +259,11 @@ fn labels(points: &[Point], steps: &[Step], args: &Args) -> (Vec<&'static str>, 
             }
             (Source::Cadence, Some(c)) if c > AMBIGUOUS_CADENCE.1 as f64 => RUN,
             (Source::Cadence, Some(c)) if c < AMBIGUOUS_CADENCE.0 as f64 => WALK,
-            // Inside the band, or no cadence here: hold the state, else ask the pace.
-            (Source::Cadence, _) => state.unwrap_or_else(|| by_pace(k)),
+            // Inside the band: hold the state, else ask the pace.
+            (Source::Cadence, Some(_)) => state.unwrap_or_else(|| by_pace(k)),
+            // No cadence, as when standing still: the pace decides, so a stop
+            // does not join the runs on either side of it.
+            (Source::Cadence, None) => by_pace(k),
         };
         state = Some(label);
         out[k] = label;
@@ -302,11 +364,12 @@ pub fn build_passes(activity: &Activity, args: &Args) -> Vec<Pass> {
     let raws = absorb(raws, args.min_pass as f64);
 
     let t = offsets(points);
+    let climbs = climbs(points);
     raws.iter()
         .map(|raw| {
             let start = raw.first - 1;
             let end = raw.last;
-            let stats = pass_stats(points, &steps, &t, start, end, args);
+            let stats = pass_stats(points, &steps, &climbs, &t, start, end, args);
             // Whole passes outside the guard, or with nothing left after it.
             let excluded = stats.pace.is_none_or(|pace| {
                 args.max_pace.is_some_and(|max| pace > max as f64)
@@ -350,6 +413,7 @@ fn spread(values: &[f64]) -> (Option<f64>, Option<f64>, Option<f64>, Option<f64>
 fn pass_stats(
     points: &[Point],
     steps: &[Step],
+    climbs: &[(f64, f64)],
     t: &[f64],
     start: usize,
     end: usize,
@@ -423,24 +487,18 @@ fn pass_stats(
         .filter(|x| x.0 >= t1 - third)
         .map(|x| x.1)
         .collect();
-    let hr_drift = (!first.is_empty() && !last.is_empty()).then(|| mean(&last) - mean(&first));
+    let hr_drift = (time >= MIN_DRIFT_S && !first.is_empty() && !last.is_empty())
+        .then(|| mean(&last) - mean(&first));
 
-    let (mut gain, mut loss, mut has_alt) = (0.0, 0.0, false);
-    for &k in &counted {
-        if let (Some(a), Some(b)) = (points[k - 1].altitude, points[k].altitude) {
-            has_alt = true;
-            let d = b - a;
-            if d > 0.0 {
-                gain += d;
-            } else {
-                loss -= d;
-            }
-        }
-    }
+    let has_alt = counted.iter().any(|&k| points[k].altitude.is_some());
+    let gain: f64 = counted.iter().map(|&k| climbs[k].0).sum();
+    let loss: f64 = counted.iter().map(|&k| climbs[k].1).sum();
 
     let pace = (distance > 0.0).then(|| time / (distance / 1000.0));
+    // Under one window, GPS pace still lags the change of cadence.
+    let pace_reliable = time >= args.window as f64;
     let stride_m = cad_mean
-        .filter(|_| time > 0.0)
+        .filter(|_| pace_reliable && time > 0.0)
         .map(|c| distance / (c * time / 60.0));
 
     PassStats {
@@ -449,6 +507,7 @@ fn pass_stats(
         time_s: round(time, 1),
         distance_m: round(distance, 1),
         pace: opt_round(pace, 1),
+        pace_reliable,
         pace_sd: opt_round(pace_sd, 1),
         pace_min: opt_round(pace_min, 1),
         pace_max: opt_round(pace_max, 1),

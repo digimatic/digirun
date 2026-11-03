@@ -99,7 +99,12 @@ pub fn build_segments(activity: &Activity, args: &Args) -> Vec<Segment> {
             continue;
         }
         if total_time >= args.min_segment as f64 && total_distance >= args.min_distance {
-            let cadences: Vec<f64> = bucket.iter().filter_map(|x| x.2).collect();
+            // A cadence of 0 is a stop, not a measurement.
+            let cadences: Vec<f64> = bucket
+                .iter()
+                .filter_map(|x| x.2)
+                .filter(|&c| c > 0.0)
+                .collect();
             let pace = total_time / (total_distance / 1000.0);
             let cadence = if cadences.is_empty() {
                 None
@@ -136,6 +141,7 @@ pub fn lap_segments(activity: &Activity, args: &Args) -> Vec<Segment> {
         let cadences: Vec<f64> = activity.points[lap.start_index..=lap.end_index]
             .iter()
             .filter_map(|p| p.cadence)
+            .filter(|&c| c > 0.0)
             .collect();
         let cadence = if cadences.is_empty() {
             None
