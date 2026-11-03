@@ -89,6 +89,14 @@ function filterRoute() {
 }
 routeFilter.addEventListener("change", filterRoute);
 
+// A route card links to the sessions, showing only that route's.
+document.querySelectorAll(".route-card").forEach((card) => {
+  card.addEventListener("click", () => {
+    routeFilter.value = card.dataset.route;
+    filterRoute();
+  });
+});
+
 // A link to a session opens it, clearing whatever would hide it.
 function openLinkedSession() {
   const id = window.location.hash.slice(1);

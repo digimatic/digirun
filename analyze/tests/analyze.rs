@@ -11,6 +11,7 @@ use garmin_analyze::csvout::write_csvs;
 use garmin_analyze::dt::{Date, DateTime};
 use garmin_analyze::html::render;
 use garmin_analyze::load::{activity_types, load_activities};
+use garmin_analyze::map::Frame;
 use garmin_analyze::metrics::{
     acute_chronic, assign_routes, build, hr_zone, minetti_cost, prediction_source, previous_weeks,
     riegel, trimp, vdot,
@@ -1211,4 +1212,60 @@ fn html_holds_no_positions_or_network_addresses() {
     assert!(!page.contains("57.74"));
     assert!(!page.contains("12.12"));
     assert!(!page.contains("http"));
+}
+
+/// `run_on`, heading north-east from a starting position.
+fn run_from(id: &str, day: u32, lat: f64, lon: f64) -> Activity {
+    let mut run = run_on(id, "Run", day);
+    for (i, point) in run.points.iter_mut().enumerate() {
+        point.lat = lat + i as f64 * 0.00002;
+        point.lon = lon + i as f64 * 0.00003;
+    }
+    run
+}
+
+#[test]
+fn route_frame_uses_one_scale_for_both_axes() {
+    let square = [(0.0, 0.0), (1000.0, 0.0), (1000.0, 1000.0), (0.0, 1000.0)];
+    let frame = Frame::fit(&square, (320.0, 220.0), 20.0).unwrap();
+    let (left, bottom) = frame.px((0.0, 0.0));
+    let (right, top) = frame.px((1000.0, 1000.0));
+    assert!((right - left - (bottom - top)).abs() < 1e-9);
+    assert!(top < bottom, "north is up");
+    assert!(top >= 20.0 && bottom <= 200.0);
+    assert_eq!(Frame::fit(&[], (320.0, 220.0), 20.0), None);
+}
+
+#[test]
+fn html_draws_routes_without_their_positions() {
+    let run = run_from("1", 3, 57.7412345, 12.1298765);
+    let args = html_args(None);
+    let page = render(&build(&[&run], &args), &args, august(3));
+    assert!(page.contains("class=\"card route-card\" href=\"#sessions\" data-route=\"0\""));
+    assert!(page.contains("class=\"track run\""));
+    assert!(!page.contains("57.7"));
+    assert!(!page.contains("12.1298"));
+}
+
+#[test]
+fn html_notes_a_session_without_a_track() {
+    let run = run_on("1", "Run", 3);
+    let args = html_args(None);
+    let page = render(&build(&[&run], &args), &args, august(3));
+    assert!(page.contains("No GPS track for this session."));
+    assert!(page.contains("No GPS tracks in this range."));
+}
+
+#[test]
+fn html_overview_leaves_out_a_faraway_route() {
+    let (a, b, far) = (
+        run_from("1", 3, 57.74, 12.12),
+        run_from("2", 4, 57.75, 12.13),
+        run_from("3", 5, 40.0, -3.7),
+    );
+    let args = html_args(None);
+    let page = render(&build(&[&a, &b, &far], &args), &args, august(5));
+    assert!(page.contains("1 further away than 15 km left out here"));
+    // The faraway route keeps its card.
+    assert_eq!(page.matches("data-route=\"2\"><svg").count(), 2);
 }

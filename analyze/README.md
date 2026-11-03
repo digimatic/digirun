@@ -118,12 +118,14 @@ Pace values in the CSVs are seconds per kilometre, matching `summary.csv`.
 
 `--html runs/analysis/report.html` writes one page with charts and sortable tables:
 this week against the previous 4, progress, HR zones and load, fitness per route, best
-efforts, and every session with its run/walk passes. A toggle switches between the last
-6 months and everything in the range. Print the page to get a PDF.
+efforts, a drawing of each route, and every session with its route and run/walk
+passes. A toggle switches between the last 6 months and everything in the range.
+Print the page to get a PDF.
 
 The page follows `--start/--end`, `--days`, `--type` and `--activity`. It loads
-nothing from the network and holds no GPS positions, but activity names can include
-place names, so treat it as private.
+nothing from the network and holds no latitude or longitude. Route drawings have a
+scale but no street map, though their shapes and the activity names can still show
+where you run, so treat the page as private.
 
 ## Tables and range
 

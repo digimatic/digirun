@@ -15,6 +15,7 @@ pub mod csvout;
 pub mod dt;
 pub mod html;
 pub mod load;
+pub mod map;
 pub mod metrics;
 pub mod model;
 pub mod parse;

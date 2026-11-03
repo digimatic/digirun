@@ -1,8 +1,9 @@
 //! The report as one self-contained HTML page, with its charts as inline SVG.
 //!
-//! The page loads nothing from the network and holds no GPS positions. Every
-//! range-dependent section is rendered once per range, and the toggle in the nav
-//! picks which one shows.
+//! The page loads nothing from the network and holds no latitude or longitude:
+//! route drawings are fitted to the picture (src/map.rs). Every range-dependent
+//! section is rendered once per range, and the toggle in the nav picks which one
+//! shows.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -10,6 +11,7 @@ use std::path::Path;
 use crate::analyze::{RUN, WALK};
 use crate::args::Args;
 use crate::dt::Date;
+use crate::map::{routes_section, session_map};
 use crate::metrics::{
     prediction_source, previous_weeks, riegel, sessions_in_range, vdot, Effort, Metrics, Session,
     Week, EFFORT_DISTANCES_M, RUNNING_EFFORT_SHARE, ZONES,
@@ -132,6 +134,15 @@ pub fn render(metrics: &Metrics, args: &Args, reference: Date) -> String {
         }
         out.push_str(&predictions(metrics, reference));
     }));
+    page.push_str(&section("routes", "Routes", |out| {
+        out.push_str(
+            "<p class=\"note\">Each route is drawn from its newest session, north up. Click a card \
+             for its sessions.</p>\n",
+        );
+        for view in &views {
+            out.push_str(&in_view(view, &routes_section(&view.sessions, &routes)));
+        }
+    }));
     page.push_str(&section("sessions", "Sessions", |out| {
         out.push_str(&sessions_table(&sessions, cutoff, args));
     }));
@@ -189,6 +200,7 @@ fn nav(default_range: &str) -> String {
         ("load", "HR and load"),
         ("fitness", "Fitness"),
         ("efforts", "Efforts"),
+        ("routes", "Routes"),
         ("sessions", "Sessions"),
     ]
     .iter()
@@ -798,7 +810,7 @@ fn sessions_table(sessions: &[&Session], cutoff: Date, args: &Args) -> String {
         })
         .collect();
     let mut out = format!(
-        "<p class=\"note\">Click a session for its run and walk passes, or a column to sort.</p>\n\
+        "<p class=\"note\">Click a session for its route and its run and walk passes, or a column to sort.</p>\n\
          <label class=\"filter\">Route <select id=\"route-filter\"><option value=\"\">All routes\
          </option>{options}</select></label>\n<div class=\"table-wrap\">\n\
          <table id=\"sessions-table\">\n<thead><tr>"
@@ -864,9 +876,12 @@ fn session_rows(s: &Session, cutoff: Date, args: &Args, columns: usize) -> Strin
     row.push_str(&number(s.recovery, &whole));
     row.push_str(&number(s.elev_gain, &whole));
     row.push_str(&number(s.trimp, &whole));
+    let passes = build_passes(s.activity, args);
     row.push_str(&format!(
-        "</tr>\n<tr class=\"passes\" hidden><td colspan=\"{columns}\">{}</td></tr>\n</tbody>\n",
-        passes_table(&build_passes(s.activity, args))
+        "</tr>\n<tr class=\"passes\" hidden><td colspan=\"{columns}\"><div class=\"session-detail\">\
+         {}{}</div></td></tr>\n</tbody>\n",
+        session_map(s.activity, &passes),
+        passes_table(&passes)
     ));
     row
 }

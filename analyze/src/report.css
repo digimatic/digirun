@@ -552,6 +552,110 @@ tr.passes > td {
   color: var(--muted);
 }
 
+.overview-map {
+  margin-bottom: 12px;
+}
+
+.overview-map .note {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+svg.map {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+svg .run {
+  --mark: var(--s1);
+}
+
+svg .walk {
+  --mark: var(--s2);
+}
+
+svg .other {
+  --mark: var(--muted);
+}
+
+.legend .other {
+  --key: var(--muted);
+}
+
+svg path.track {
+  fill: none;
+  stroke: var(--mark, var(--muted));
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+svg path.track-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  pointer-events: stroke;
+}
+
+svg .start {
+  fill: var(--ink);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+svg .scale {
+  stroke: var(--ink-2);
+  stroke-width: 2;
+}
+
+.route-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.route-card {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.route-card:hover {
+  background: var(--wash);
+}
+
+.route-card .label {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.session-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 20px;
+}
+
+.session-map {
+  flex: 0 1 320px;
+  min-width: 240px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.session-map .legend {
+  margin: 4px 0 0;
+}
+
+.start-key {
+  margin-right: 0;
+  --key: var(--ink);
+}
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
