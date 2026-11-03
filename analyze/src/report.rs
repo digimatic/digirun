@@ -479,7 +479,7 @@ pub fn print_metrics(metrics: &Metrics, args: &Args, reference: Date) {
 }
 
 /// `+23%`, or `-` when there is nothing to compare with.
-fn change(value: f64, baseline: Option<f64>) -> String {
+pub(crate) fn change(value: f64, baseline: Option<f64>) -> String {
     match baseline {
         Some(baseline) if baseline > 0.0 => {
             format!("{:+}%", round_int((value / baseline - 1.0) * 100.0))
@@ -535,7 +535,7 @@ fn load_line(label: &str, load: Load, unit: &str) -> String {
     )
 }
 
-fn km_load(metrics: &Metrics, reference: Date) -> Load {
+pub(crate) fn km_load(metrics: &Metrics, reference: Date) -> Load {
     let samples: Vec<(Date, f64)> = metrics
         .sessions
         .iter()
@@ -544,7 +544,7 @@ fn km_load(metrics: &Metrics, reference: Date) -> Load {
     acute_chronic(&samples, reference)
 }
 
-fn trimp_load(metrics: &Metrics, reference: Date) -> Load {
+pub(crate) fn trimp_load(metrics: &Metrics, reference: Date) -> Load {
     let samples: Vec<(Date, f64)> = metrics
         .sessions
         .iter()
@@ -592,12 +592,19 @@ fn print_zones(metrics: &Metrics, args: &Args, reference: Date) {
     println!("{}", load_line("Volume", km_load(metrics, reference), "km"));
 }
 
-fn route_label(route: Option<usize>) -> String {
+pub(crate) fn route_label(route: Option<usize>) -> String {
     route.map_or("no GPS".to_string(), |r| format!("R{}", r + 1))
 }
 
-fn mean_of(values: &[f64]) -> Option<f64> {
+pub(crate) fn mean_of(values: &[f64]) -> Option<f64> {
     (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
+}
+
+/// The median elevation gain of these sessions.
+pub(crate) fn typical_gain(sessions: &[&Session]) -> Option<f64> {
+    let mut gains: Vec<f64> = sessions.iter().filter_map(|s| s.elev_gain).collect();
+    gains.sort_by(f64::total_cmp);
+    gains.get(gains.len() / 2).copied()
 }
 
 fn print_fitness(metrics: &Metrics, args: &Args) {
@@ -616,9 +623,8 @@ fn print_fitness(metrics: &Metrics, args: &Args) {
     );
     for route in routes {
         let rows: Vec<&&Session> = sessions.iter().filter(|s| s.route == route).collect();
-        let mut gains: Vec<f64> = rows.iter().filter_map(|s| s.elev_gain).collect();
-        gains.sort_by(f64::total_cmp);
-        let gain = gains.get(gains.len() / 2).copied();
+        let plain: Vec<&Session> = rows.iter().map(|s| **s).collect();
+        let gain = typical_gain(&plain);
         println!();
         println!(
             "{} ({} sessions, typical gain {})",
@@ -665,7 +671,7 @@ fn effort_cells(effort: Option<&Effort>) -> String {
     }
 }
 
-fn fastest<'e>(efforts: impl Iterator<Item = &'e Effort>) -> Option<&'e Effort> {
+pub(crate) fn fastest<'e>(efforts: impl Iterator<Item = &'e Effort>) -> Option<&'e Effort> {
     efforts.min_by(|a, b| a.time_s.total_cmp(&b.time_s))
 }
 

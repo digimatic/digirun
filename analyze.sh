@@ -21,12 +21,14 @@ INTERVAL="${DIGIRUN_INTERVAL:-3600}"
 STAMP="$OUT/.last_fetch"
 FORCE=0
 FULL=0
+OPEN=0
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=1 ;;
         --full) FULL=1 ;;
+        --open) OPEN=1 ;;
         *)
-            echo "usage: $0 [--force] [--full]" >&2
+            echo "usage: $0 [--force] [--full] [--open]" >&2
             exit 2
             ;;
     esac
@@ -63,11 +65,13 @@ echo
 
 # Set DIGIRUN_HR_MAX for HR zones and load (analyze/README.md).
 echo
+# The charts and tables in one page, always over all history.
+REPORT="$OUT/analysis/report.html"
 if [ "$FULL" -eq 1 ]; then
     # Every metric table, over all history.
     "$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 \
         --show progress,zones,fitness,efforts,summary \
-        --type running,trail ${DIGIRUN_HR_MAX:+--hr-max "$DIGIRUN_HR_MAX"}
+        --html "$REPORT" --type running,trail ${DIGIRUN_HR_MAX:+--hr-max "$DIGIRUN_HR_MAX"}
 else
     # The last 8 weeks, then this week against the previous 4. Only the summary
     # writes the CSVs, because they cover the range and it has none.
@@ -75,5 +79,13 @@ else
         --type running,trail
     echo
     "$ANALYZE" --out "$OUT" --max-pace 15:00 --min-pace 3:00 --show summary \
-        --type running,trail ${DIGIRUN_HR_MAX:+--hr-max "$DIGIRUN_HR_MAX"}
+        --html "$REPORT" --type running,trail ${DIGIRUN_HR_MAX:+--hr-max "$DIGIRUN_HR_MAX"}
+fi
+
+if [ "$OPEN" -eq 1 ]; then
+    if command -v open >/dev/null; then
+        open "$REPORT"
+    else
+        xdg-open "$REPORT"
+    fi
 fi

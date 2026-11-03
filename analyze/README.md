@@ -63,6 +63,7 @@ ignored as GPS noise.
 | `--min-pace` | exclude segments faster than this from the stats, e.g. `3:00` (default: none) |
 | `--cadence-stats` | also report cadence mean + stdev (strides/min) |
 | `--min-pass` / `--smooth` | detail table: shortest pass, and cadence smoothing (default 20 s / 10 s) |
+| `--html PATH` | also write the metrics as one self-contained HTML page with charts, whatever `--show` picks |
 | `--show` | tables to print: `activities,weekly,overall` (default), `detail`, `summary`, `progress`, `zones`, `fitness`, `efforts`, or `all` |
 | `--hr-max` | maximum heart rate in bpm, needed for HR zones, TRIMP and pace in zone 3; never guessed |
 | `--report-dir` | where the CSVs are written (default `./runs/analysis`) |
@@ -112,6 +113,17 @@ walk     2157 19:22:09   106.61   10:54   1:22    5:27   14:57  53.4%   54.5    
 ```
 
 Pace values in the CSVs are seconds per kilometre, matching `summary.csv`.
+
+## HTML report
+
+`--html runs/analysis/report.html` writes one page with charts and sortable tables:
+this week against the previous 4, progress, HR zones and load, fitness per route, best
+efforts, and every session with its run/walk passes. A toggle switches between the last
+6 months and everything in the range. Print the page to get a PDF.
+
+The page follows `--start/--end`, `--days`, `--type` and `--activity`. It loads
+nothing from the network and holds no GPS positions, but activity names can include
+place names, so treat it as private.
 
 ## Tables and range
 

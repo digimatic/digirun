@@ -13,6 +13,7 @@ pub mod args;
 pub mod csv;
 pub mod csvout;
 pub mod dt;
+pub mod html;
 pub mod load;
 pub mod metrics;
 pub mod model;
@@ -97,7 +98,7 @@ pub fn run(args: &Args) -> i32 {
         (kept_segments, dropped_slow, dropped_fast) = analyze::filter_segments(&seg_refs, args);
         if kept_segments.is_empty() {
             println!("No segments matched — try a smaller --window or a wider date range.");
-            if !args.show.detail {
+            if !args.show.detail && args.html.is_none() {
                 return 0;
             }
         }
@@ -114,7 +115,7 @@ pub fn run(args: &Args) -> i32 {
     };
 
     let reference = args.end.unwrap_or_else(dt::Date::today);
-    let metrics = args.show.metrics().then(|| metrics::build(&kept, args));
+    let metrics = (args.show.metrics() || args.html.is_some()).then(|| metrics::build(&kept, args));
 
     let mut notes: Vec<String> = Vec::new();
     let range = match (args.start, args.end) {
@@ -217,12 +218,21 @@ pub fn run(args: &Args) -> i32 {
                 return 1;
             }
         }
-        if let Some(metrics) = &metrics {
+        if let Some(metrics) = metrics.as_ref().filter(|_| args.show.metrics()) {
             if let Err(error) = csvout::write_metrics(&report_dir, metrics, args) {
                 eprintln!("error: {error}");
                 return 1;
             }
         }
+    }
+    if let (Some(path), Some(metrics)) = (&args.html, &metrics) {
+        let path = expanduser(path);
+        if let Err(error) = html::write_report(&path, metrics, args, reference) {
+            eprintln!("error: {error}");
+            return 1;
+        }
+        println!();
+        println!("Wrote {}", path.display());
     }
     0
 }

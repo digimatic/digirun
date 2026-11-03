@@ -9,6 +9,7 @@ use garmin_analyze::analyze::{
 use garmin_analyze::args::{help, parse, parse_with_today, Args, Method, Tables};
 use garmin_analyze::csvout::write_csvs;
 use garmin_analyze::dt::{Date, DateTime};
+use garmin_analyze::html::render;
 use garmin_analyze::load::{activity_types, load_activities};
 use garmin_analyze::metrics::{
     acute_chronic, assign_routes, build, hr_zone, minetti_cost, prediction_source, previous_weeks,
@@ -1090,4 +1091,124 @@ fn longest_run_distance_belongs_to_the_longest_time() {
 
     let later = previous_weeks(&metrics.weeks, date(2026, 8, 31)).unwrap();
     assert_eq!((later.longest_run_s, later.longest_run_m), (600.0, 900.0));
+}
+
+fn html_args(hr_max: Option<i64>) -> Args {
+    Args {
+        hr_max,
+        ..Args::default()
+    }
+}
+
+/// Eight minutes of running with HR on a given day of August 2026.
+fn run_on(id: &str, name: &str, day: u32) -> Activity {
+    let mut points = track(&[(480, 80.0, 3.0)]);
+    for point in &mut points {
+        point.time.date.day = day;
+        point.hr = Some(150.0);
+    }
+    let mut activity = activity(&points);
+    activity.activity_id = id.to_string();
+    activity.name = name.to_string();
+    activity
+}
+
+fn august(day: u32) -> Date {
+    Date {
+        year: 2026,
+        month: 8,
+        day,
+    }
+}
+
+#[test]
+fn html_option_parses() {
+    let args = parse(&["--html".to_string(), "out/report.html".to_string()]).unwrap();
+    assert_eq!(args.html, Some(PathBuf::from("out/report.html")));
+    assert_eq!(parse(&[]).unwrap().html, None);
+}
+
+#[test]
+fn html_escapes_activity_names() {
+    let run = run_on("1", "<script>alert('x')</script> & co", 3);
+    let args = html_args(None);
+    let page = render(&build(&[&run], &args), &args, august(3));
+    assert!(!page.contains("<script>alert"));
+    assert!(page.contains("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; co"));
+}
+
+#[test]
+fn html_explains_a_missing_hr_max() {
+    let run = run_on("1", "Run", 3);
+    let without = html_args(None);
+    let page = render(&build(&[&run], &without), &without, august(3));
+    assert!(page.contains("Needs --hr-max"));
+    assert!(!page.contains("Time in HR zones"));
+
+    let with = html_args(Some(186));
+    let page = render(&build(&[&run], &with), &with, august(3));
+    assert!(!page.contains("Needs --hr-max"));
+    assert!(page.contains("Time in HR zones"));
+    assert!(page.contains("TRIMP load"));
+}
+
+#[test]
+fn html_keeps_empty_weeks_in_the_charts() {
+    let (first, second) = (run_on("1", "Run", 3), run_on("2", "Run", 24));
+    let args = html_args(None);
+    let page = render(&build(&[&first, &second], &args), &args, august(24));
+    // Monday 3 to Monday 24 August, with two weeks between them without a session.
+    assert!(page.contains("2026-W33\nno sessions"));
+    assert!(page.contains("2026-W34\nno sessions"));
+}
+
+#[test]
+fn html_handles_sessions_without_hr_or_running() {
+    let mut walk = activity(&track(&[(300, 50.0, 1.2)]));
+    walk.name = "Walk".to_string();
+    for point in &mut walk.points {
+        point.hr = None;
+    }
+    let args = html_args(Some(186));
+    let page = render(&build(&[&walk], &args), &args, august(7));
+    assert!(page.contains("No data in this range."));
+    assert!(page.contains("id=\"s-1\""));
+}
+
+#[test]
+fn html_shows_an_empty_range_without_failing() {
+    let args = html_args(None);
+    let metrics = build(&[], &args);
+    let page = render(&metrics, &args, august(7));
+    assert!(page.contains("0 sessions"));
+    assert!(page.contains("body data-range=\"all\""));
+}
+
+#[test]
+fn html_defaults_to_all_when_nothing_is_recent() {
+    let run = run_on("1", "Run", 3);
+    let args = html_args(None);
+    let later = Date {
+        year: 2027,
+        month: 8,
+        day: 3,
+    };
+    let page = render(&build(&[&run], &args), &args, later);
+    assert!(page.contains("body data-range=\"all\""));
+    let page = render(&build(&[&run], &args), &args, august(3));
+    assert!(page.contains("body data-range=\"recent\""));
+}
+
+#[test]
+fn html_holds_no_positions_or_network_addresses() {
+    let mut run = run_on("1", "Run", 3);
+    for point in &mut run.points {
+        point.lat = 57.7412345;
+        point.lon = 12.1298765;
+    }
+    let args = html_args(Some(186));
+    let page = render(&build(&[&run], &args), &args, august(3));
+    assert!(!page.contains("57.74"));
+    assert!(!page.contains("12.12"));
+    assert!(!page.contains("http"));
 }

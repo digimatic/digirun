@@ -159,6 +159,8 @@ pub struct Args {
     pub smooth: i64,
     /// Maximum heart rate; HR zones and TRIMP need it, and it is never guessed.
     pub hr_max: Option<i64>,
+    /// Where to write the HTML report, if anywhere.
+    pub html: Option<PathBuf>,
 }
 
 /// Worker threads used to parse the files.
@@ -206,6 +208,7 @@ impl Default for Args {
             min_pass: DEFAULT_MIN_PASS_S,
             smooth: DEFAULT_SMOOTH_S,
             hr_max: None,
+            html: None,
         }
     }
 }
@@ -489,6 +492,11 @@ fn groups() -> Vec<Group> {
                     "report tables to print: 'all' or comma-separated activities,weekly,overall,detail,summary,progress,zones,fitness,efforts (default: activities,weekly,overall); detail lists every run/walk pass, split on cadence, with its stats".to_string(),
                 ),
                 Action::new(&["--no-csv"], "", "print the report only".to_string()),
+                Action::new(
+                    &["--html"],
+                    "PATH",
+                    "also write the metrics as one self-contained HTML page with charts, whatever --show picks".to_string(),
+                ),
             ],
         },
     ]
@@ -753,6 +761,7 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
             "--report-dir" => args.report_dir = PathBuf::from(value(&mut i)?),
             "--cadence-stats" => args.cadence_stats = true,
             "--no-csv" => args.no_csv = true,
+            "--html" => args.html = Some(PathBuf::from(value(&mut i)?)),
             "--show" => {
                 let raw = value(&mut i)?;
                 let mut show = Tables::none();
