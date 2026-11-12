@@ -4,8 +4,8 @@
 //! GPX and TCX use different namespace prefixes for the same elements
 //! (`ns3:TrackPointExtension` vs `TPX`).
 
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 #[derive(Debug, Default)]
 pub struct Node {

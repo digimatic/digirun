@@ -15,10 +15,10 @@ use crate::args::Args;
 use crate::dt::Date;
 use crate::map::{routes_section, session_map};
 use crate::metrics::{
-    prediction_source, previous_weeks, riegel, sessions_in_range, vdot, Effort, Metrics, Session,
-    Week, EFFORT_DISTANCES_M, RUNNING_EFFORT_SHARE, ZONES,
+    EFFORT_DISTANCES_M, Effort, Metrics, RUNNING_EFFORT_SHARE, Session, Week, ZONES,
+    prediction_source, previous_weeks, riegel, sessions_in_range, vdot,
 };
-use crate::passes::{build_passes, Pass};
+use crate::passes::{Pass, build_passes};
 use crate::report::{
     change, fastest, fmt_duration, fmt_pace, km_load, mean_of, route_label, trimp_load,
     typical_gain,

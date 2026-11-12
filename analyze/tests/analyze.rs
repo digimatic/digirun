@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use garmin_analyze::analyze::{
     build_segments, classify, filter_activities, filter_segments, in_range, round, stats,
 };
-use garmin_analyze::args::{help, parse, parse_with_today, Args, Method, Tables};
+use garmin_analyze::args::{Args, Method, Tables, help, parse, parse_with_today};
 use garmin_analyze::csvout::write_csvs;
 use garmin_analyze::dt::{Date, DateTime};
 use garmin_analyze::html::render;
@@ -18,7 +18,7 @@ use garmin_analyze::metrics::{
 };
 use garmin_analyze::model::{Activity, Lap, Point, Segment};
 use garmin_analyze::parse::{read_gpx, read_tcx};
-use garmin_analyze::passes::{build_passes, climbs, Source};
+use garmin_analyze::passes::{Source, build_passes, climbs};
 use garmin_analyze::xml;
 
 const FIXTURE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -562,7 +562,7 @@ fn pass_stats_cover_hr_elevation_and_stride() {
     );
     assert_eq!((s.hr_min, s.hr_max), (Some(120.2), Some(150.0))); // 120.25, rounded
     assert_eq!(s.hr_drift, None); // two minutes is mostly HR lag
-                                  // The rolling mean rounds off the 60 m peak and the track's ends.
+    // The rolling mean rounds off the 60 m peak and the track's ends.
     let (gain, loss) = (s.elev_gain.unwrap(), s.elev_loss.unwrap());
     assert!((40.0..60.0).contains(&gain), "gain {gain}");
     assert!((40.0..60.0).contains(&loss), "loss {loss}");

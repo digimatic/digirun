@@ -5,9 +5,9 @@
 //! from a rolling median of cadence with a hysteresis band, runs of the same label
 //! become passes, and passes shorter than `--min-pass` join a neighbour.
 
-use crate::analyze::{mean, round, stdev, RUN, WALK};
-use crate::args::{Args, Method, AMBIGUOUS_CADENCE};
-use crate::model::{haversine, Activity, Point};
+use crate::analyze::{RUN, WALK, mean, round, stdev};
+use crate::args::{AMBIGUOUS_CADENCE, Args, Method};
+use crate::model::{Activity, Point, haversine};
 
 /// What the labels of a pass came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

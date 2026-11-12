@@ -6,7 +6,7 @@ use std::path::Path;
 use crate::analyze::{round, stats};
 use crate::args::Args;
 use crate::csv::Writer;
-use crate::metrics::{sessions_in_range, Metrics};
+use crate::metrics::{Metrics, sessions_in_range};
 use crate::model::{Activity, Segment};
 use crate::passes::Pass;
 use crate::report::py_num;

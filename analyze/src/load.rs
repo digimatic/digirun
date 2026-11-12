@@ -201,13 +201,15 @@ pub fn load_activities(out_dir: &Path, jobs: usize) -> Loaded {
                 let work = Arc::clone(&work);
                 let results = Arc::clone(&results);
                 let next = Arc::clone(&next);
-                std::thread::spawn(move || loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    if index >= work.len() {
-                        break;
+                std::thread::spawn(move || {
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        if index >= work.len() {
+                            break;
+                        }
+                        let result = read_group(&work[index].0, &work[index].1);
+                        results.lock().unwrap()[index] = Some(result);
                     }
-                    let result = read_group(&work[index].0, &work[index].1);
-                    results.lock().unwrap()[index] = Some(result);
                 })
             })
             .collect();

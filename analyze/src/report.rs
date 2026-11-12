@@ -4,14 +4,14 @@ use std::collections::BTreeMap;
 
 use crate::analyze::stats;
 use crate::analyze::{RUN, WALK};
-use crate::args::{Args, Method, AMBIGUOUS_CADENCE};
+use crate::args::{AMBIGUOUS_CADENCE, Args, Method};
 use crate::dt::Date;
 use crate::metrics::{
-    acute_chronic, prediction_source, previous_weeks, riegel, sessions_in_range, vdot, Effort,
-    Load, Metrics, Session, EFFORT_DISTANCES_M, RUNNING_EFFORT_SHARE, ZONES,
+    EFFORT_DISTANCES_M, Effort, Load, Metrics, RUNNING_EFFORT_SHARE, Session, ZONES, acute_chronic,
+    prediction_source, previous_weeks, riegel, sessions_in_range, vdot,
 };
 use crate::model::{Activity, Segment, Stats};
-use crate::passes::{totals, Pass, Source};
+use crate::passes::{Pass, Source, totals};
 
 /// Python's `str(float)`: whole numbers keep the `.0`.
 pub fn py_num(value: f64) -> String {
@@ -343,8 +343,27 @@ fn totals_line(label: &str, passes: &[&Pass]) -> String {
 pub fn print_detail(activities: &[(&Activity, Vec<Pass>)]) {
     let header = format!(
         "  {:>3} {:<6} {:>7} {:>7} {:>6} {:>6} {:>5} {:>6} {:>6} {:>5} {:>4} {:>4} {:>4} {:>4} {:>4} {:>4} {:>5} {:>5} {:>5} {:>6} {:>5}  laps",
-        "#", "class", "start", "time", "dist m", "pace", "sd", "min", "max", "cad", "sd", "min",
-        "max", "hr", "min", "max", "drift", "elev+", "elev-", "stride", "stop"
+        "#",
+        "class",
+        "start",
+        "time",
+        "dist m",
+        "pace",
+        "sd",
+        "min",
+        "max",
+        "cad",
+        "sd",
+        "min",
+        "max",
+        "hr",
+        "min",
+        "max",
+        "drift",
+        "elev+",
+        "elev-",
+        "stride",
+        "stop"
     );
     let mut excluded = 0usize;
     for (activity, passes) in activities {

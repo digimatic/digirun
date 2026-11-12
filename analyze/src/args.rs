@@ -662,7 +662,7 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                     code: 0,
                     message: help(),
                     stdout: true,
-                })
+                });
             }
             "--out" => args.out = PathBuf::from(value(&mut i)?),
             "--start" => args.start = Some(parse_date(&value(&mut i)?, "start date")?),
@@ -701,7 +701,7 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                             "argument --method: invalid choice: {} (choose from {})",
                             quoted(&raw),
                             METHODS.join(", ")
-                        )))
+                        )));
                     }
                 };
             }
@@ -791,7 +791,7 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                                 "argument --show: invalid choice: {} (choose from {})",
                                 quoted(name),
                                 SHOW_TABLES.join(", ")
-                            )))
+                            )));
                         }
                     }
                 }
@@ -856,7 +856,7 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
             other => {
                 return Err(CliError::argument(format!(
                     "unrecognized arguments: {other}"
-                )))
+                )));
             }
         }
         i += 1;

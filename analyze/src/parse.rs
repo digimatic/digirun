@@ -1,7 +1,7 @@
 //! GPX and TCX readers.
 
 use crate::dt::DateTime;
-use crate::model::{haversine, Lap, Point};
+use crate::model::{Lap, Point, haversine};
 use crate::xml::Node;
 
 fn num(value: &str) -> Option<f64> {
