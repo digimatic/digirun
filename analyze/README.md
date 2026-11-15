@@ -317,10 +317,16 @@ local `Host`.
 | `src/parse.rs` | `read_gpx` / `read_tcx` |
 | `src/xml.rs` | small namespace-agnostic DOM |
 | `src/model.rs` | `Point`, `Activity`, `Segment`, haversine |
-| `src/analyze.rs` | classification, segmentation, stats, filters, `round` |
+| `src/analyze.rs` | classification, segmentation, stats, filters |
 | `src/passes.rs` | the detail table: cadence-split passes and their stats |
-| `src/metrics.rs` | session and week metrics: load, zones, fitness, routes, efforts |
+| `src/metrics.rs` | session and week metrics: load, zones, fitness, efforts |
+| `src/routes.rs` | grouping tracks into routes, describing them, applying `routes.txt` |
+| `src/naming.rs` / `src/serve.rs` | `--name-routes` in the terminal, `--serve` with renaming |
+| `src/num.rs` / `src/format.rs` | mean, median, `round`; pace, duration and number formatting |
 | `src/dt.rs` | timestamps, dates, ISO weeks |
 | `src/csv.rs` / `src/csvout.rs` | CSV writing |
 | `src/report.rs` | the console tables |
+| `src/html/mod.rs` / `src/html/chart.rs` | the HTML page; its SVG bar and line charts |
+| `src/map.rs` | route drawings and the `--map` satellite maps |
 | `src/lib.rs` / `src/main.rs` | `run()` and the thin binary |
+| `tests/*.rs` | integration tests per area, fixtures in `tests/common/mod.rs` |
