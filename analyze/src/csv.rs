@@ -1,7 +1,7 @@
 //! Minimal CSV reading and writing, matching what Python's `csv` module does:
 //! `\r\n` line endings and minimal quoting.
 
-/// Quote a field the way `csv.writer` does (QUOTE_MINIMAL).
+/// Quote a field the way `csv.writer` does (`QUOTE_MINIMAL`).
 pub fn field(value: &str) -> String {
     if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
         format!("\"{}\"", value.replace('"', "\"\""))

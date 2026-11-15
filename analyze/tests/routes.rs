@@ -162,12 +162,14 @@ fn ask_keeps_renames_and_clears() {
     assert!(shown.contains("  name [Home]: "));
     assert!(shown.contains("can't contain #"));
     // Enter keeps; clearing an unnamed route, or end of input, changes nothing.
-    assert!(
-        ask(&routes, "\n-\n".as_bytes(), Vec::new())
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        ask(&routes, "\n-\n".as_bytes(), Vec::new()).unwrap(),
+        [] as [garmin_analyze::naming::Change; 0]
     );
-    assert!(ask(&routes, "".as_bytes(), Vec::new()).unwrap().is_empty());
+    assert_eq!(
+        ask(&routes, "".as_bytes(), Vec::new()).unwrap(),
+        [] as [garmin_analyze::naming::Change; 0]
+    );
     assert_eq!(
         ask(&routes, "Park\n".as_bytes(), Vec::new()).unwrap().len(),
         1

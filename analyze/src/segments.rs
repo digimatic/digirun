@@ -226,7 +226,7 @@ pub fn filter_activities<'a>(
     }
 }
 
-/// Drop segments outside the pace window; returns (kept, dropped_slow, dropped_fast).
+/// Drop segments outside the pace window; returns (kept, `dropped_slow`, `dropped_fast`).
 pub fn filter_segments<'a>(
     segments: &'a [&'a Segment],
     args: &Args,

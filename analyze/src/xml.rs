@@ -90,7 +90,7 @@ fn node(start: &quick_xml::events::BytesStart) -> Node {
         name: local(start.name()),
         attrs: start
             .attributes()
-            .filter_map(|a| a.ok())
+            .filter_map(Result::ok)
             .map(|a| {
                 (
                     local(a.key),

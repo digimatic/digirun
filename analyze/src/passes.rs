@@ -240,7 +240,9 @@ fn labels(points: &[Point], steps: &[Step], args: &Args) -> (Vec<&'static str>, 
     let mut state: Option<&'static str> = None;
     for k in 1..steps.len() {
         let label = match (source, cadence[k]) {
-            (Source::Pace, _) => by_pace(k),
+            // Without cadence, as when standing still, the pace decides, so a
+            // stop does not join the runs on either side of it.
+            (Source::Pace, _) | (Source::Cadence, None) => by_pace(k),
             (Source::Cadence, Some(c)) if args.method == Method::Cadence => {
                 if c >= args.cadence_threshold as f64 {
                     RUN
@@ -252,9 +254,6 @@ fn labels(points: &[Point], steps: &[Step], args: &Args) -> (Vec<&'static str>, 
             (Source::Cadence, Some(c)) if c < AMBIGUOUS_CADENCE.0 as f64 => WALK,
             // Inside the band: hold the state, else ask the pace.
             (Source::Cadence, Some(_)) => state.unwrap_or_else(|| by_pace(k)),
-            // No cadence, as when standing still: the pace decides, so a stop
-            // does not join the runs on either side of it.
-            (Source::Cadence, None) => by_pace(k),
         };
         state = Some(label);
         out[k] = label;

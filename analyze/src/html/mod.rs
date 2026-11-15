@@ -600,6 +600,8 @@ fn efficiency_chart(running: &[&Session], routes: &[(usize, &'static str)]) -> S
 }
 
 /// Run pace and grade-adjusted pace over time.
+// `Session::run_pace` does not coerce to the fn pointer, because of its lifetime.
+#[allow(clippy::redundant_closure_for_method_calls)]
 fn pace_chart(running: &[&Session]) -> String {
     let pace_tip = |s: &Session| {
         format!(

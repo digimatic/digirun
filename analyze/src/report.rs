@@ -62,8 +62,8 @@ pub fn method_note(args: &Args) -> String {
             "cadence >= {} strides/min (pace fallback: {}/km)",
             args.cadence_threshold, pace
         ),
-        Method::Pace => format!("pace <= {}/km", pace),
-        Method::Lap => format!("TCX laps, each labelled by pace <= {}/km", pace),
+        Method::Pace => format!("pace <= {pace}/km"),
+        Method::Lap => format!("TCX laps, each labelled by pace <= {pace}/km"),
         Method::Hybrid => format!(
             "cadence < {lo} walk / > {hi} run, band {lo}-{hi} resolved by pace <= {pace}/km",
             lo = AMBIGUOUS_CADENCE.0,
@@ -125,9 +125,8 @@ fn print_activities(activities: &[&Activity], segments: &[&Segment], show_cad: b
     println!("{header}");
     println!("{}", "-".repeat(header.chars().count()));
     for activity in activities {
-        let rows = match by_activity.get(activity.activity_id.as_str()) {
-            Some(rows) => rows,
-            None => continue,
+        let Some(rows) = by_activity.get(activity.activity_id.as_str()) else {
+            continue;
         };
         if rows.is_empty() {
             continue;
@@ -222,10 +221,7 @@ fn print_overall(segments: &[&Segment], show_cad: bool) {
 
 /// Right-aligned cell of `width`, or `-` when the value is missing.
 fn opt(value: Option<f64>, width: usize, show: fn(f64) -> String) -> String {
-    format!(
-        "{:>width$}",
-        value.map(show).unwrap_or_else(|| "-".to_string())
-    )
+    format!("{:>width$}", value.map_or_else(|| "-".to_string(), show))
 }
 
 fn int(value: f64) -> String {
@@ -337,7 +333,7 @@ fn print_session_passes(activity: &Activity, passes: &[Pass]) {
         let laps = p
             .laps
             .iter()
-            .map(|l| l.to_string())
+            .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join(",");
         println!(

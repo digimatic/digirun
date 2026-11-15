@@ -113,8 +113,8 @@ fn analysis_csv(activities: &[&Activity], segments: &[&Segment], args: &Args) ->
                 share,
             ];
             if args.cadence_stats {
-                row.push(st.cad_mean.map(py_num).unwrap_or_default());
-                row.push(st.cad_stdev.map(py_num).unwrap_or_default());
+                row.push(st.cad_mean.map_or_default(py_num));
+                row.push(st.cad_stdev.map_or_default(py_num));
             }
             writer.row(&row);
         }
@@ -136,8 +136,7 @@ fn segments_csv(segments: &[&Segment]) -> String {
             s.class.to_string(),
             py_num(round(s.pace_s_per_km, 1)),
             s.cadence
-                .map(|cadence| py_num(round(cadence, 1)))
-                .unwrap_or_default(),
+                .map_or_default(|cadence| py_num(round(cadence, 1))),
             py_num(round(s.distance_m, 1)),
             py_num(round(s.duration_s, 1)),
         ]);
@@ -184,7 +183,7 @@ pub fn write_passes(
     activities: &[(&Activity, Vec<Pass>)],
 ) -> Result<(), String> {
     std::fs::create_dir_all(report_dir).map_err(|e| format!("{}: {e}", report_dir.display()))?;
-    let num = |value: Option<f64>| value.map(py_num).unwrap_or_default();
+    let num = |value: Option<f64>| value.map_or_default(py_num);
 
     let mut writer = Writer::new();
     writer.row(&PASS_FIELDS);
@@ -199,7 +198,7 @@ pub fn write_passes(
                 (i + 1).to_string(),
                 p.class.to_string(),
                 p.source.as_str().to_string(),
-                (p.excluded as u8).to_string(),
+                u8::from(p.excluded).to_string(),
                 activity.points[p.start].time.isoformat(),
                 py_num(round(s.start_offset_s, 1)),
                 py_num(s.time_s),
@@ -222,7 +221,7 @@ pub fn write_passes(
                 num(s.stride_m),
                 p.laps
                     .iter()
-                    .map(|l| l.to_string())
+                    .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(" "),
                 activity.points[p.end].time.isoformat(),
@@ -301,9 +300,8 @@ pub const WEEK_FIELDS: [&str; 20] = [
 /// Write `sessions.csv` and `weeks.csv`, narrowed to --start/--end.
 pub fn write_metrics(report_dir: &Path, metrics: &Metrics, args: &Args) -> Result<(), String> {
     std::fs::create_dir_all(report_dir).map_err(|e| format!("{}: {e}", report_dir.display()))?;
-    let num = |value: Option<f64>, digits: usize| {
-        value.map(|v| py_num(round(v, digits))).unwrap_or_default()
-    };
+    let num =
+        |value: Option<f64>, digits: usize| value.map_or_default(|v| py_num(round(v, digits)));
 
     let mut writer = Writer::new();
     writer.row(&SESSION_FIELDS);
@@ -313,7 +311,7 @@ pub fn write_metrics(report_dir: &Path, metrics: &Metrics, args: &Args) -> Resul
             s.activity.activity_id.clone(),
             s.activity.name.clone(),
             s.activity.r#type.clone(),
-            s.route.map(|r| format!("R{}", r + 1)).unwrap_or_default(),
+            s.route.map_or_default(|r| format!("R{}", r + 1)),
             s.route.map_or(String::new(), |_| s.route_name.clone()),
             py_num(round(s.run_s, 1)),
             py_num(round(s.walk_s, 1)),

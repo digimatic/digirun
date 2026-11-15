@@ -179,20 +179,13 @@ pub struct Args {
 /// Worker threads used to parse the files.
 pub fn default_jobs() -> usize {
     std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
+        .map_or(1, std::num::NonZero::get)
         .min(8)
 }
 
 /// The types analyzed by default; `--type all` turns the filter off.
 fn default_types() -> Option<BTreeSet<String>> {
-    Some(
-        DEFAULT_TYPES
-            .split(',')
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
-            .collect(),
-    )
+    list(DEFAULT_TYPES)
 }
 
 impl Default for Args {
@@ -308,7 +301,7 @@ struct Action {
 impl Action {
     fn new(strings: &[&str], metavar: &str, help: String) -> Action {
         Action {
-            strings: strings.iter().map(|s| s.to_string()).collect(),
+            strings: strings.iter().map(ToString::to_string).collect(),
             metavar: metavar.to_string(),
             help,
         }
@@ -326,7 +319,7 @@ impl Action {
 
     /// How the action appears in the usage line: the first option string only.
     fn usage_part(&self) -> String {
-        let first = self.strings.first().map(|s| s.as_str()).unwrap_or_default();
+        let first = self.strings.first().map_or_default(String::as_str);
         if self.metavar.is_empty() {
             format!("[{first}]")
         } else {
@@ -579,7 +572,7 @@ pub fn usage() -> String {
     let parts: Vec<String> = action_groups
         .iter()
         .flat_map(|group| group.actions.iter())
-        .map(|action| action.usage_part())
+        .map(Action::usage_part)
         .collect();
     let width = format_width();
     let prefix = "usage: ";
@@ -769,10 +762,10 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
             "--gap" => args.gap = int(flag, &value(&mut i)?)?,
             // Python treats a pace guard of 0 as "not set", so the same is done here.
             "--max-pace" => {
-                args.max_pace = Some(parse_pace(&value(&mut i)?, "max pace")?).filter(|v| *v != 0)
+                args.max_pace = Some(parse_pace(&value(&mut i)?, "max pace")?).filter(|v| *v != 0);
             }
             "--min-pace" => {
-                args.min_pace = Some(parse_pace(&value(&mut i)?, "min pace")?).filter(|v| *v != 0)
+                args.min_pace = Some(parse_pace(&value(&mut i)?, "min pace")?).filter(|v| *v != 0);
             }
             "--report-dir" => args.report_dir = PathBuf::from(value(&mut i)?),
             "--cadence-stats" => args.cadence_stats = true,

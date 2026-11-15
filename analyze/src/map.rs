@@ -69,7 +69,7 @@ impl Frame {
         let span_x = (high.0 - low.0).max(MIN_SPAN_M);
         let span_y = (high.1 - low.1).max(MIN_SPAN_M);
         Some(Frame {
-            centre: ((low.0 + high.0) / 2.0, (low.1 + high.1) / 2.0),
+            centre: (f64::midpoint(low.0, high.0), f64::midpoint(low.1, high.1)),
             size,
             scale: ((size.0 - 2.0 * pad) / span_x).min((size.1 - 2.0 * pad) / span_y),
         })
@@ -165,7 +165,7 @@ fn session_map_host(activity: &Activity, passes: &[Pass], cos_lat: f64) -> Strin
             .map(|pass| {
                 format!(
                     "[{},{}]",
-                    (pass.class == RUN) as u8,
+                    u8::from(pass.class == RUN),
                     positions_json(&activity.points[pass.start..=pass.end], cos_lat)
                 )
             })

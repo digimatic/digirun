@@ -101,7 +101,7 @@ impl TimeAxis {
         let per_month = self.width * 30.4 / span;
         let every = [1u32, 2, 3, 6, 12]
             .into_iter()
-            .find(|months| per_month * *months as f64 >= MIN_TICK_SPACING)
+            .find(|months| per_month * f64::from(*months) >= MIN_TICK_SPACING)
             .unwrap_or(12);
         let y = HEIGHT - 6.0;
         let (mut year, mut month) = (start.year, start.month);
@@ -261,6 +261,8 @@ pub(super) fn bar_chart(
             ));
             height_so_far += height;
         }
+        // peak is the largest of the totals, so this finds that bar exactly.
+        #[allow(clippy::float_cmp)]
         if *total == peak && peak_label.is_none() {
             peak_label = Some((x + bar_width / 2.0, y(*total)));
         }

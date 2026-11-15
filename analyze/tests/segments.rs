@@ -229,7 +229,7 @@ fn type_filter_keeps_requested_types() {
 
     let wanted: BTreeSet<String> = ["running", "trail", "walking"]
         .iter()
-        .map(|t| t.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
     let (kept, skipped, unknown) = filter_activities(&refs, &Some(wanted));
     assert_eq!(

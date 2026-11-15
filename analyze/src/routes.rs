@@ -105,12 +105,11 @@ pub fn assign_routes(tracks: &[BTreeSet<(i64, i64)>]) -> Vec<Option<usize>> {
                 .map(|(i, first)| (i, jaccard(track, first)))
                 .filter(|&(_, overlap)| overlap >= ROUTE_MIN_OVERLAP)
                 .max_by(|a, b| a.1.total_cmp(&b.1));
-            Some(match best {
-                Some((i, _)) => i,
-                None => {
-                    firsts.push(track);
-                    firsts.len() - 1
-                }
+            Some(if let Some((i, _)) = best {
+                i
+            } else {
+                firsts.push(track);
+                firsts.len() - 1
             })
         })
         .collect()

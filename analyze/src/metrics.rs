@@ -178,6 +178,7 @@ pub fn riegel(time_s: f64, from_m: f64, to_m: f64) -> f64 {
 }
 
 /// Daniels' VDOT for a performance.
+#[allow(clippy::unreadable_literal)] // the published coefficients, as written
 pub fn vdot(distance_m: f64, time_s: f64) -> f64 {
     let minutes = time_s / 60.0;
     let velocity = distance_m / minutes;
@@ -210,7 +211,7 @@ fn decoupling(activity: &Activity, passes: &[Pass], steps: &[Step], t: &[f64]) -
         return None;
     }
     let begin = t[pass.start] + DECOUPLING_SKIP_S;
-    let middle = (begin + t[pass.end]) / 2.0;
+    let middle = f64::midpoint(begin, t[pass.end]);
     // (seconds with HR, metres, heartbeats-weighted seconds) per half.
     let mut halves = [(0.0, 0.0, 0.0); 2];
     for k in pass.start + 1..=pass.end {
@@ -220,7 +221,7 @@ fn decoupling(activity: &Activity, passes: &[Pass], steps: &[Step], t: &[f64]) -
         let Some(hr) = activity.points[k].hr else {
             continue;
         };
-        let half = &mut halves[(t[k] > middle) as usize];
+        let half = &mut halves[usize::from(t[k] > middle)];
         half.0 += steps[k].dt;
         half.1 += steps[k].dm;
         half.2 += hr * steps[k].dt;
