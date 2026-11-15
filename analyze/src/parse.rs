@@ -10,9 +10,8 @@ fn num(value: &str) -> Option<f64> {
 
 /// Trackpoints plus the track name. Distance is derived from positions.
 pub fn read_gpx(root: &Node) -> (Vec<Point>, String) {
-    let trk = match root.find("trk") {
-        Some(trk) => trk,
-        None => return (Vec::new(), root.text("name")),
+    let Some(trk) = root.find("trk") else {
+        return (Vec::new(), root.text("name"));
     };
     let name = trk.text("name");
 
@@ -24,9 +23,8 @@ pub fn read_gpx(root: &Node) -> (Vec<Point>, String) {
         for pt in seg.children_named("trkpt") {
             let lat: f64 = pt.attr("lat").unwrap_or("0").parse().unwrap_or(0.0);
             let lon: f64 = pt.attr("lon").unwrap_or("0").parse().unwrap_or(0.0);
-            let time = match DateTime::from_iso(&pt.text("time")) {
-                Some(time) => time,
-                None => continue,
+            let Some(time) = DateTime::from_iso(&pt.text("time")) else {
+                continue;
             };
             if let Some((plat, plon)) = prev {
                 cumulative += haversine(plat, plon, lat, lon);
@@ -51,11 +49,10 @@ pub fn read_gpx(root: &Node) -> (Vec<Point>, String) {
     (points, name)
 }
 
-/// Trackpoints and laps. DistanceMeters is cumulative within each lap.
+/// Trackpoints and laps. `DistanceMeters` is cumulative within each lap.
 pub fn read_tcx(root: &Node) -> (Vec<Point>, Vec<Lap>) {
-    let activity = match root.find("Activities").and_then(|a| a.find("Activity")) {
-        Some(activity) => activity,
-        None => return (Vec::new(), Vec::new()),
+    let Some(activity) = root.find("Activities").and_then(|a| a.find("Activity")) else {
+        return (Vec::new(), Vec::new());
     };
 
     let mut points: Vec<Point> = Vec::new();
@@ -71,21 +68,18 @@ pub fn read_tcx(root: &Node) -> (Vec<Point>, Vec<Lap>) {
             .into_iter()
             .flat_map(|t| t.children_named("Trackpoint"))
         {
-            let time = match DateTime::from_iso(&tp.text("Time")) {
-                Some(time) => time,
-                None => continue,
+            let Some(time) = DateTime::from_iso(&tp.text("Time")) else {
+                continue;
             };
             // Position is optional: some exports have no GPS, so DistanceMeters
             // (cumulative within the lap) is the only distance available.
             let pos = tp.find("Position");
             let lat: f64 = pos
-                .map(|p| p.text("LatitudeDegrees"))
-                .unwrap_or_default()
+                .map_or_default(|p| p.text("LatitudeDegrees"))
                 .parse()
                 .unwrap_or(0.0);
             let lon: f64 = pos
-                .map(|p| p.text("LongitudeDegrees"))
-                .unwrap_or_default()
+                .map_or_default(|p| p.text("LongitudeDegrees"))
                 .parse()
                 .unwrap_or(0.0);
             let cadence = match tp.find("Extensions") {

@@ -3,14 +3,12 @@
 /// Python's `round(value, digits)`: the correctly rounded decimal, read back as
 /// a float, so the CSVs hold short, stable numbers.
 pub fn round(value: f64, digits: usize) -> f64 {
-    format!("{:.*}", digits, value)
-        .parse::<f64>()
-        .unwrap_or(value)
+    format!("{value:.digits$}").parse::<f64>().unwrap_or(value)
 }
 
 /// Python's `round(value)` to an integer (half to even).
 pub(crate) fn round_int(value: f64) -> i64 {
-    format!("{:.0}", value).parse::<i64>().unwrap_or(0)
+    format!("{value:.0}").parse::<i64>().unwrap_or(0)
 }
 
 /// The mean of a non-empty slice.
@@ -40,7 +38,7 @@ pub(crate) fn median(values: &mut [f64]) -> f64 {
     if n % 2 == 1 {
         values[n / 2]
     } else {
-        (values[n / 2 - 1] + values[n / 2]) / 2.0
+        f64::midpoint(values[n / 2 - 1], values[n / 2])
     }
 }
 

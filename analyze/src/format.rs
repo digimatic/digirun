@@ -15,9 +15,9 @@ pub fn py_num(value: f64) -> String {
         };
     }
     if value.fract() == 0.0 {
-        format!("{:.1}", value)
+        format!("{value:.1}")
     } else {
-        format!("{}", value)
+        format!("{value}")
     }
 }
 

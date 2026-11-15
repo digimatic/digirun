@@ -34,9 +34,8 @@ impl Date {
     /// Parse `YYYY-MM-DD`.
     pub fn from_iso(value: &str) -> Option<Date> {
         let mut parts = value.split('-');
-        let (y, m, d) = match (parts.next(), parts.next(), parts.next()) {
-            (Some(y), Some(m), Some(d)) => (y, m, d),
-            _ => return None,
+        let (Some(y), Some(m), Some(d)) = (parts.next(), parts.next(), parts.next()) else {
+            return None;
         };
         let year = y.parse::<i32>().ok()?;
         let month = m.parse::<u32>().ok()?;
@@ -51,8 +50,7 @@ impl Date {
     pub fn today() -> Date {
         let secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
+            .map_or(0, |d| d.as_secs() as i64);
         civil_from_days(secs.div_euclid(86400))
     }
 
@@ -131,9 +129,9 @@ impl DateTime {
     /// Microseconds since the Unix epoch, so timestamps compare by instant.
     pub fn instant(&self) -> i64 {
         let days = days_from_civil(self.date.year, self.date.month, self.date.day);
-        let local =
-            ((days * 24 + self.hour as i64) * 60 + self.minute as i64) * 60 + self.second as i64;
-        (local - self.offset as i64) * 1_000_000 + self.micro as i64
+        let local = ((days * 24 + i64::from(self.hour)) * 60 + i64::from(self.minute)) * 60
+            + i64::from(self.second);
+        (local - i64::from(self.offset)) * 1_000_000 + i64::from(self.micro)
     }
 
     /// Seconds since the previous timestamp, as Python's `total_seconds()`.
@@ -201,26 +199,27 @@ fn parse_offset(value: &str) -> Option<i32> {
 
 /// Days from 1970-01-01 (Howard Hinnant's `days_from_civil`).
 fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
-    let y = if month <= 2 { year - 1 } else { year } as i64;
+    let y = i64::from(if month <= 2 { year - 1 } else { year });
     let era = (if y >= 0 { y } else { y - 399 }) / 400;
     let yoe = y - era * 400;
-    let doy =
-        (153 * (if month > 2 { month - 3 } else { month + 9 }) as i64 + 2) / 5 + day as i64 - 1;
+    let doy = (153 * i64::from(if month > 2 { month - 3 } else { month + 9 }) + 2) / 5
+        + i64::from(day)
+        - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468
+    era * 146_097 + doe - 719_468
 }
 
 /// The date `days` after 1970-01-01 (Howard Hinnant's `civil_from_days`).
 fn civil_from_days(days: i64) -> Date {
-    let z = days + 719468;
-    let era = (if z >= 0 { z } else { z - 146096 }) / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let z = days + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
     let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let year = (yoe + era * 400 + if month <= 2 { 1 } else { 0 }) as i32;
+    let year = (yoe + era * 400 + i64::from(month <= 2)) as i32;
     Date { year, month, day }
 }
 

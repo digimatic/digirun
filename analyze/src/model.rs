@@ -7,7 +7,7 @@ pub struct Point {
     pub time: DateTime,
     pub lat: f64,
     pub lon: f64,
-    /// Cumulative distance in metres (from positions in GPX, from DistanceMeters in TCX).
+    /// Cumulative distance in metres (from positions in GPX, from `DistanceMeters` in TCX).
     pub distance_m: f64,
     pub cadence: Option<f64>,
     pub hr: Option<f64>,
@@ -61,7 +61,7 @@ pub struct Stats {
 
 /// Great-circle distance in metres.
 pub fn haversine(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    const R: f64 = 6371000.0;
+    const R: f64 = 6_371_000.0;
     let p1 = lat1.to_radians();
     let p2 = lat2.to_radians();
     let dp = p2 - p1;

@@ -101,7 +101,7 @@ impl TimeAxis {
         let per_month = self.width * 30.4 / span;
         let every = [1u32, 2, 3, 6, 12]
             .into_iter()
-            .find(|months| per_month * *months as f64 >= MIN_TICK_SPACING)
+            .find(|months| per_month * f64::from(*months) >= MIN_TICK_SPACING)
             .unwrap_or(12);
         let y = HEIGHT - 6.0;
         let (mut year, mut month) = (start.year, start.month);
@@ -240,27 +240,16 @@ pub(super) fn bar_chart(
     for (week, total) in weeks.iter().zip(&totals) {
         let slot = axis.x(week.monday.days());
         let x = slot + (band - bar_width) / 2.0;
-        let parts = values(week);
-        let last_part = parts.iter().rposition(|v| *v > 0.0);
-        let mut height_so_far = 0.0;
-        for (i, (value, (_, class))) in parts.iter().zip(chart.series).enumerate() {
-            if *value <= 0.0 {
-                continue;
-            }
-            let height = value * scale;
-            let is_top = last_part == Some(i);
-            let drawn = if is_top {
-                height
-            } else {
-                (height - GAP).max(1.0)
-            };
-            let top = baseline - height_so_far - drawn;
-            svg.push_str(&format!(
-                "<path class=\"{class}\" d=\"{}\"/>\n",
-                bar_path(x, top, bar_width, drawn, is_top)
-            ));
-            height_so_far += height;
-        }
+        svg.push_str(&stacked_bar(
+            &values(week),
+            chart.series,
+            x,
+            bar_width,
+            baseline,
+            scale,
+        ));
+        // peak is the largest of the totals, so this finds that bar exactly.
+        #[allow(clippy::float_cmp)]
         if *total == peak && peak_label.is_none() {
             peak_label = Some((x + bar_width / 2.0, y(*total)));
         }
@@ -284,10 +273,7 @@ pub(super) fn bar_chart(
         }
         svg.push_str(&format!("<path class=\"baseline-line\" d=\"{path}\"/>\n"));
     }
-    svg.push_str(&format!(
-        "<line class=\"axis\" x1=\"{LEFT}\" x2=\"{:.1}\" y1=\"{baseline:.1}\" y2=\"{baseline:.1}\"/>\n",
-        WIDTH - RIGHT
-    ));
+    svg.push_str(&x_axis_line(baseline));
     if let Some((x, top)) = peak_label {
         let x = x.clamp(LEFT + 20.0, WIDTH - RIGHT - 20.0);
         svg.push_str(&format!(
@@ -305,21 +291,67 @@ pub(super) fn bar_chart(
         ));
     }
 
+    frame(chart.title, chart.caption, &bar_legend(chart), &svg)
+}
+
+/// One week's bar: a part per series stacked up from `baseline`, `scale` pixels
+/// per unit, with a gap between parts and the top part rounded.
+fn stacked_bar(
+    parts: &[f64],
+    series: &[(&str, &str)],
+    x: f64,
+    bar_width: f64,
+    baseline: f64,
+    scale: f64,
+) -> String {
+    let last_part = parts.iter().rposition(|v| *v > 0.0);
+    let mut svg = String::new();
+    let mut height_so_far = 0.0;
+    for (i, (value, (_, class))) in parts.iter().zip(series).enumerate() {
+        if *value <= 0.0 {
+            continue;
+        }
+        let height = value * scale;
+        let is_top = last_part == Some(i);
+        let drawn = if is_top {
+            height
+        } else {
+            (height - GAP).max(1.0)
+        };
+        let top = baseline - height_so_far - drawn;
+        svg.push_str(&format!(
+            "<path class=\"{class}\" d=\"{}\"/>\n",
+            bar_path(x, top, bar_width, drawn, is_top)
+        ));
+        height_so_far += height;
+    }
+    svg
+}
+
+/// The series as boxes and the overlay as a stroke; none for a lone series.
+fn bar_legend(chart: &BarChart) -> String {
     let mut items: Vec<(String, &str, &str)> = Vec::new();
     if chart.series.len() >= 2 || chart.overlay.is_some() {
         for (name, class) in chart.series {
-            items.push((name.to_string(), class, "box"));
+            items.push(((*name).to_string(), class, "box"));
         }
     }
     if let Some((name, _)) = &chart.overlay {
-        items.push((name.to_string(), "neutral", "stroke"));
+        items.push(((*name).to_string(), "neutral", "stroke"));
     }
-    let keys = if items.is_empty() {
+    if items.is_empty() {
         String::new()
     } else {
         legend(&items)
-    };
-    frame(chart.title, chart.caption, &keys, &svg)
+    }
+}
+
+/// The x axis along the bottom of the plot.
+fn x_axis_line(baseline: f64) -> String {
+    format!(
+        "<line class=\"axis\" x1=\"{LEFT}\" x2=\"{:.1}\" y1=\"{baseline:.1}\" y2=\"{baseline:.1}\"/>\n",
+        WIDTH - RIGHT
+    )
 }
 
 pub(super) struct Point {
@@ -409,10 +441,7 @@ pub(super) fn line_chart(title: &str, caption: &str, series: &[Series], axis_y: 
     let mut svg = grid(&ticks, &y, &axis_y.show);
     svg.push_str(&axis.labels(min_date.minus_days(pad)));
     let baseline = TOP + plot_height();
-    svg.push_str(&format!(
-        "<line class=\"axis\" x1=\"{LEFT}\" x2=\"{:.1}\" y1=\"{baseline:.1}\" y2=\"{baseline:.1}\"/>\n",
-        WIDTH - RIGHT
-    ));
+    svg.push_str(&x_axis_line(baseline));
     for s in series {
         let mut path = String::new();
         let mut previous: Option<Date> = None;
@@ -453,12 +482,17 @@ pub(super) fn line_chart(title: &str, caption: &str, series: &[Series], axis_y: 
             ));
         }
     }
+    frame(title, caption, &line_legend(series), &svg)
+}
+
+/// The series that have points; none for a chart of one series.
+fn line_legend(series: &[Series]) -> String {
     let visible: Vec<(String, &str, &str)> = series
         .iter()
         .filter(|s| !s.points.is_empty())
         .map(|s| (s.name.clone(), s.class, "stroke"))
         .collect();
-    let keys = if visible.len() >= 2 {
+    if visible.len() >= 2 {
         legend(&visible)
     } else {
         // One line of several still needs its name, because the colour alone does not say.
@@ -466,6 +500,5 @@ pub(super) fn line_chart(title: &str, caption: &str, series: &[Series], axis_y: 
             (Some(only), n) if n >= 2 => legend(std::slice::from_ref(only)),
             _ => String::new(),
         }
-    };
-    frame(title, caption, &keys, &svg)
+    }
 }

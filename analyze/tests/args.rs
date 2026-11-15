@@ -12,7 +12,12 @@ use common::*;
 
 #[test]
 fn days_counts_back_from_end_or_today() {
-    let argv = |values: &[&str]| values.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let argv = |values: &[&str]| {
+        values
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>()
+    };
     let today = Date {
         year: 2026,
         month: 1,
@@ -51,7 +56,7 @@ fn detail_options_parse() {
         "6",
     ]
     .iter()
-    .map(|s| s.to_string())
+    .map(std::string::ToString::to_string)
     .collect();
     let args = parse(&argv).expect("the options should parse");
 
@@ -68,7 +73,12 @@ fn detail_options_parse() {
 
 #[test]
 fn show_picks_the_report_tables() {
-    let argv = |values: &[&str]| values.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let argv = |values: &[&str]| {
+        values
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>()
+    };
 
     let args = parse(&argv(&["--show", "weekly, overall"])).expect("the option should parse");
     assert_eq!(
@@ -117,7 +127,12 @@ fn name_routes_option_asks_about_the_last_30_days() {
 
 #[test]
 fn metric_options_parse() {
-    let argv = |values: &[&str]| values.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let argv = |values: &[&str]| {
+        values
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>()
+    };
 
     let args = parse(&argv(&["--show", "summary,zones", "--hr-max=186"])).expect("should parse");
     assert_eq!(args.hr_max, Some(186));
@@ -168,4 +183,12 @@ fn map_needs_html() {
     let html = ["--html".to_string(), "r.html".to_string(), map];
     assert!(parse(&html).unwrap().map);
     assert!(!parse(&[]).unwrap().map);
+}
+
+#[test]
+fn jobs_under_one_runs_single_threaded() {
+    for value in ["0", "-3"] {
+        let args = parse(&["--jobs".to_string(), value.to_string()]).unwrap();
+        assert_eq!(args.jobs, 1, "--jobs {value}");
+    }
 }

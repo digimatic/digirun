@@ -38,8 +38,7 @@ fn is_digits(value: &str) -> bool {
 
 fn stem(path: &Path) -> String {
     path.file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default()
+        .map_or_default(|s| s.to_string_lossy().into_owned())
 }
 
 /// Activity name from the download filename, without the timestamp prefix.
@@ -68,19 +67,17 @@ pub fn date_from_filename(path: &Path) -> Option<Date> {
     Date::from_iso(&stem.chars().take(10).collect::<String>())
 }
 
-/// activity_id -> type key, from the summary.csv written by garmin-runs.
+/// `activity_id` -> type key, from the summary.csv written by garmin-runs.
 ///
 /// The GPX/TCX files themselves do not record the activity type, so summary.csv
 /// is the only source. Returns an empty map when it is missing.
 pub fn activity_types(out_dir: &Path) -> BTreeMap<String, String> {
-    let content = match std::fs::read_to_string(out_dir.join("summary.csv")) {
-        Ok(content) => content,
-        Err(_) => return BTreeMap::new(),
+    let Ok(content) = std::fs::read_to_string(out_dir.join("summary.csv")) else {
+        return BTreeMap::new();
     };
     let records = csv::read_records(&content);
-    let id_index = match csv::column(&records, "activity_id") {
-        Some(index) => index,
-        None => return BTreeMap::new(),
+    let Some(id_index) = csv::column(&records, "activity_id") else {
+        return BTreeMap::new();
     };
     let type_index = csv::column(&records, "type");
 
@@ -173,8 +170,7 @@ pub fn groups(out_dir: &Path) -> Vec<(String, Files)> {
     for path in entries {
         let suffix = path
             .extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
+            .map_or_default(|e| e.to_string_lossy().to_lowercase());
         if suffix != "gpx" && suffix != "tcx" {
             continue;
         }

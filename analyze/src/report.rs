@@ -2,8 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::analyze::stats;
-use crate::analyze::{RUN, WALK};
 use crate::args::{AMBIGUOUS_CADENCE, Args, Method};
 use crate::dt::Date;
 use crate::format::{change, duration_or_dash, fmt_duration, fmt_pace, py_num};
@@ -15,6 +13,7 @@ use crate::metrics::{
 use crate::model::{Activity, Segment, Stats};
 use crate::num::{mean_of, round_int};
 use crate::passes::{Pass, Source, totals};
+use crate::segments::{RUN, WALK, of_class, stats};
 
 /// Right-aligned cell, or `-` when the value is missing.
 fn cell(value: Option<f64>) -> String {
@@ -63,8 +62,8 @@ pub fn method_note(args: &Args) -> String {
             "cadence >= {} strides/min (pace fallback: {}/km)",
             args.cadence_threshold, pace
         ),
-        Method::Pace => format!("pace <= {}/km", pace),
-        Method::Lap => format!("TCX laps, each labelled by pace <= {}/km", pace),
+        Method::Pace => format!("pace <= {pace}/km"),
+        Method::Lap => format!("TCX laps, each labelled by pace <= {pace}/km"),
         Method::Hybrid => format!(
             "cadence < {lo} walk / > {hi} run, band {lo}-{hi} resolved by pace <= {pace}/km",
             lo = AMBIGUOUS_CADENCE.0,
@@ -126,27 +125,14 @@ fn print_activities(activities: &[&Activity], segments: &[&Segment], show_cad: b
     println!("{header}");
     println!("{}", "-".repeat(header.chars().count()));
     for activity in activities {
-        let rows = match by_activity.get(activity.activity_id.as_str()) {
-            Some(rows) => rows,
-            None => continue,
+        let Some(rows) = by_activity.get(activity.activity_id.as_str()) else {
+            continue;
         };
         if rows.is_empty() {
             continue;
         }
-        let run = stats(
-            &rows
-                .iter()
-                .filter(|s| s.class == "run")
-                .copied()
-                .collect::<Vec<_>>(),
-        );
-        let walk = stats(
-            &rows
-                .iter()
-                .filter(|s| s.class == "walk")
-                .copied()
-                .collect::<Vec<_>>(),
-        );
+        let run = stats(&of_class(rows, RUN));
+        let walk = stats(&of_class(rows, WALK));
         let mut parts = vec![
             format!("{:<11}", activity.date.isoformat()),
             format!(
@@ -180,20 +166,8 @@ fn print_weekly(segments: &[&Segment], show_cad: bool) {
             .push(s);
     }
     for (week, rows) in &weeks {
-        let run = stats(
-            &rows
-                .iter()
-                .filter(|s| s.class == "run")
-                .copied()
-                .collect::<Vec<_>>(),
-        );
-        let walk = stats(
-            &rows
-                .iter()
-                .filter(|s| s.class == "walk")
-                .copied()
-                .collect::<Vec<_>>(),
-        );
+        let run = stats(&of_class(rows, RUN));
+        let walk = stats(&of_class(rows, WALK));
         let mut parts = vec![format!("{:<10}", week)];
         parts.extend(cells(&run, show_cad));
         parts.extend(cells(&walk, show_cad));
@@ -215,12 +189,8 @@ fn print_overall(segments: &[&Segment], show_cad: bool) {
     println!("{}", "-".repeat(header.chars().count()));
 
     let total_time: f64 = segments.iter().map(|s| s.duration_s).sum();
-    for class in ["run", "walk"] {
-        let rows: Vec<&Segment> = segments
-            .iter()
-            .copied()
-            .filter(|s| s.class == class)
-            .collect();
+    for class in [RUN, WALK] {
+        let rows = of_class(segments, class);
         if rows.is_empty() {
             continue;
         }
@@ -251,10 +221,7 @@ fn print_overall(segments: &[&Segment], show_cad: bool) {
 
 /// Right-aligned cell of `width`, or `-` when the value is missing.
 fn opt(value: Option<f64>, width: usize, show: fn(f64) -> String) -> String {
-    format!(
-        "{:>width$}",
-        value.map(show).unwrap_or_else(|| "-".to_string())
-    )
+    format!("{:>width$}", value.map_or_else(|| "-".to_string(), show))
 }
 
 fn int(value: f64) -> String {
@@ -303,6 +270,14 @@ fn totals_line(label: &str, passes: &[&Pass]) -> String {
 
 /// One block per session with its passes, then the range summary.
 pub fn print_detail(activities: &[(&Activity, Vec<Pass>)]) {
+    for (activity, passes) in activities {
+        print_session_passes(activity, passes);
+    }
+    print_range_totals(activities);
+}
+
+/// One activity's passes, then their totals.
+fn print_session_passes(activity: &Activity, passes: &[Pass]) {
     let header = format!(
         "  {:>3} {:<6} {:>7} {:>7} {:>6} {:>6} {:>5} {:>6} {:>6} {:>5} {:>4} {:>4} {:>4} {:>4} {:>4} {:>4} {:>5} {:>5} {:>5} {:>6} {:>5}  laps",
         "#",
@@ -327,77 +302,72 @@ pub fn print_detail(activities: &[(&Activity, Vec<Pass>)]) {
         "stride",
         "stop"
     );
-    let mut excluded = 0usize;
-    for (activity, passes) in activities {
-        println!();
-        println!(
-            "{}  {}  {}  ({})",
-            activity.date.isoformat(),
-            if activity.r#type.is_empty() {
-                "-"
-            } else {
-                &activity.r#type
-            },
-            activity.name,
-            activity.activity_id
-        );
-        if passes.is_empty() {
-            println!("  no passes");
-            continue;
-        }
-        if passes.iter().any(|p| p.source == Source::Pace) {
-            println!("  no cadence in this activity: passes are split on pace");
-        }
-        println!("{header}");
-        println!("  {}", "-".repeat(header.chars().count() - 2));
-        for (i, p) in passes.iter().enumerate() {
-            let s = &p.stats;
-            excluded += p.excluded as usize;
-            let class = if p.excluded {
-                format!("{}*", p.class)
-            } else {
-                p.class.to_string()
-            };
-            let laps = p
-                .laps
-                .iter()
-                .map(|l| l.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            println!(
-                "  {:>3} {:<6} {:>7} {:>7} {:>6} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {:>5}  {}",
-                i + 1,
-                class,
-                fmt_duration(s.start_offset_s),
-                fmt_duration(s.time_s),
-                int(s.distance_m),
-                opt(s.pace.filter(|_| s.pace_reliable), 6, pace),
-                opt(s.pace_sd, 5, pace),
-                opt(s.pace_min, 6, pace),
-                opt(s.pace_max, 6, pace),
-                opt(s.cad_mean, 5, one),
-                opt(s.cad_sd, 4, one),
-                opt(s.cad_min, 4, int),
-                opt(s.cad_max, 4, int),
-                opt(s.hr_mean, 4, int),
-                opt(s.hr_min, 4, int),
-                opt(s.hr_max, 4, int),
-                opt(s.hr_drift, 5, |v| format!("{:+}", round_int(v))),
-                opt(s.elev_gain, 5, one),
-                opt(s.elev_loss, 5, one),
-                opt(s.stride_m, 6, |v| format!("{v:.2}")),
-                if s.stopped_s > 0.0 {
-                    fmt_duration(s.stopped_s)
-                } else {
-                    "-".to_string()
-                },
-                laps
-            );
-        }
-        let refs: Vec<&Pass> = passes.iter().collect();
-        println!("{}", totals_line("Session", &refs));
+    println!();
+    println!(
+        "{}  {}  {}  ({})",
+        activity.date.isoformat(),
+        if activity.r#type.is_empty() {
+            "-"
+        } else {
+            &activity.r#type
+        },
+        activity.name,
+        activity.activity_id
+    );
+    if passes.is_empty() {
+        println!("  no passes");
+        return;
     }
+    if passes.iter().any(|p| p.source == Source::Pace) {
+        println!("  no cadence in this activity: passes are split on pace");
+    }
+    println!("{header}");
+    println!("  {}", "-".repeat(header.chars().count() - 2));
+    for (i, p) in passes.iter().enumerate() {
+        let s = &p.stats;
+        let class = if p.excluded {
+            format!("{}*", p.class)
+        } else {
+            p.class.to_string()
+        };
+        let laps = p
+            .laps
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "  {:>3} {:<6} {:>7} {:>7} {:>6} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {:>5}  {}",
+            i + 1,
+            class,
+            fmt_duration(s.start_offset_s),
+            fmt_duration(s.time_s),
+            int(s.distance_m),
+            opt(s.pace.filter(|_| s.pace_reliable), 6, pace),
+            opt(s.pace_sd, 5, pace),
+            opt(s.pace_min, 6, pace),
+            opt(s.pace_max, 6, pace),
+            opt(s.cad_mean, 5, one),
+            opt(s.cad_sd, 4, one),
+            opt(s.cad_min, 4, int),
+            opt(s.cad_max, 4, int),
+            opt(s.hr_mean, 4, int),
+            opt(s.hr_min, 4, int),
+            opt(s.hr_max, 4, int),
+            opt(s.hr_drift, 5, |v| format!("{:+}", round_int(v))),
+            opt(s.elev_gain, 5, one),
+            opt(s.elev_loss, 5, one),
+            opt(s.stride_m, 6, |v| format!("{v:.2}")),
+            duration_or_dash(s.stopped_s),
+            laps
+        );
+    }
+    let refs: Vec<&Pass> = passes.iter().collect();
+    println!("{}", totals_line("Session", &refs));
+}
 
+/// Run and walk totals over every pass in the range.
+fn print_range_totals(activities: &[(&Activity, Vec<Pass>)]) {
     let all: Vec<&Pass> = activities.iter().flat_map(|(_, p)| p.iter()).collect();
     println!();
     println!("Range ({} sessions)", activities.len());
@@ -430,6 +400,7 @@ pub fn print_detail(activities: &[(&Activity, Vec<Pass>)]) {
             opt(t.hr_mean, 5, int)
         );
     }
+    let excluded = all.iter().filter(|p| p.excluded).count();
     if excluded > 0 {
         println!();
         println!("* {excluded} passes outside --max-pace/--min-pace, left out of the totals");

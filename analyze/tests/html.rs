@@ -1,5 +1,8 @@
 //! The HTML report and its route drawings.
 
+// GPS coordinates read better without digit separators.
+#![allow(clippy::unreadable_literal)]
+
 mod common;
 
 use garmin_analyze::args::Args;

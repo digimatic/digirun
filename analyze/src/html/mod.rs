@@ -12,7 +12,6 @@ use std::path::Path;
 
 mod chart;
 
-use crate::analyze::{RUN, WALK};
 use crate::args::Args;
 use crate::dt::Date;
 use crate::format::{change, duration_or_dash, fmt_duration, fmt_pace};
@@ -62,49 +61,17 @@ pub fn write_report(
 /// The whole page.
 pub fn render(metrics: &Metrics, args: &Args, reference: Date) -> String {
     let sessions = sessions_in_range(metrics, args);
-    let weeks: Vec<&Week> = metrics.weeks.iter().filter(|w| w.in_range(args)).collect();
     let cutoff = reference.minus_days(RECENT_DAYS);
-    let recent = View {
-        key: "recent",
-        sessions: sessions
-            .iter()
-            .copied()
-            .filter(|s| s.activity.date >= cutoff)
-            .collect(),
-        weeks: weeks
-            .iter()
-            .copied()
-            .filter(|w| w.monday.plus_days(6) >= cutoff)
-            .collect(),
-    };
-    let default_range = if recent.sessions.is_empty() {
+    let views = views(metrics, args, &sessions, cutoff);
+    // The page opens on the recent range, unless there is nothing in it.
+    let default_range = if views[0].sessions.is_empty() {
         "all"
     } else {
         "recent"
     };
-    let all = View {
-        key: "all",
-        sessions: sessions.clone(),
-        weeks,
-    };
-    let views = [recent, all];
     let routes = charted_routes(&sessions);
 
-    let map_head = if args.map {
-        format!(
-            "<!-- Leaflet 1.9.4\n{LEAFLET_LICENSE}-->\n<style>\n{LEAFLET_CSS}{MAP_CSS}</style>\n"
-        )
-    } else {
-        String::new()
-    };
-    let mut page = String::new();
-    page.push_str(&format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>Running report</title>\n{map_head}<style>\n{CSS}</style>\n</head>\n\
-         <body data-range=\"{default_range}\"{editable}>\n",
-        editable = if args.serve { " data-editable" } else { "" }
-    ));
+    let mut page = head(args, default_range);
     page.push_str(&header(&sessions, args));
     page.push_str(&nav(default_range, args.map));
     page.push_str("<main>\n");
@@ -171,6 +138,53 @@ pub fn render(metrics: &Metrics, args: &Args, reference: Date) -> String {
     }
     page.push_str("</body>\n</html>\n");
     page
+}
+
+/// The two choices on the range toggle: the recent half year, then everything.
+fn views<'m, 'a>(
+    metrics: &'m Metrics<'a>,
+    args: &Args,
+    sessions: &[&'m Session<'a>],
+    cutoff: Date,
+) -> [View<'m, 'a>; 2] {
+    let weeks: Vec<&Week> = metrics.weeks.iter().filter(|w| w.in_range(args)).collect();
+    let recent = View {
+        key: "recent",
+        sessions: sessions
+            .iter()
+            .copied()
+            .filter(|s| s.activity.date >= cutoff)
+            .collect(),
+        weeks: weeks
+            .iter()
+            .copied()
+            .filter(|w| w.monday.plus_days(6) >= cutoff)
+            .collect(),
+    };
+    let all = View {
+        key: "all",
+        sessions: sessions.to_vec(),
+        weeks,
+    };
+    [recent, all]
+}
+
+/// The doctype, the head with the inline styles, and the opening body tag.
+fn head(args: &Args, default_range: &str) -> String {
+    let map_head = if args.map {
+        format!(
+            "<!-- Leaflet 1.9.4\n{LEAFLET_LICENSE}-->\n<style>\n{LEAFLET_CSS}{MAP_CSS}</style>\n"
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>Running report</title>\n{map_head}<style>\n{CSS}</style>\n</head>\n\
+         <body data-range=\"{default_range}\"{editable}>\n",
+        editable = if args.serve { " data-editable" } else { "" }
+    )
 }
 
 /// Text made safe for HTML content and quoted attributes.
@@ -547,6 +561,17 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
         .copied()
         .filter(|s| s.run_s > 0.0)
         .collect();
+    let mut out = String::from("<div class=\"charts\">\n");
+    out.push_str(&efficiency_chart(&running, routes));
+    out.push_str(&pace_chart(&running));
+    out.push_str(&recovery_chart(&running));
+    out.push_str("</div>\n");
+    out.push_str(&routes_table(&running));
+    out
+}
+
+/// Efficiency over time, one line per charted route.
+fn efficiency_chart(running: &[&Session], routes: &[(usize, &'static str)]) -> String {
     let series: Vec<Series> = routes
         .iter()
         .map(|&(route, class)| {
@@ -581,14 +606,18 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
         })
         .collect();
 
-    let mut out = String::from("<div class=\"charts\">\n");
-    out.push_str(&line_chart(
+    line_chart(
         "Efficiency",
         "Metres per minute for each heartbeat per minute, on the 3 most used routes. Higher is better.",
         &series,
         &TWO_DECIMALS,
-    ));
+    )
+}
 
+/// Run pace and grade-adjusted pace over time.
+// `Session::run_pace` does not coerce to the fn pointer, because of its lifetime.
+#[allow(clippy::redundant_closure_for_method_calls)]
+fn pace_chart(running: &[&Session]) -> String {
     let pace_tip = |s: &Session| {
         format!(
             "{}\npace {}\ngrade-adjusted {}",
@@ -611,7 +640,7 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
             })
             .collect(),
     };
-    out.push_str(&line_chart(
+    line_chart(
         "Run pace",
         "Minutes per kilometre, faster at the top. Grade-adjusted pace is the flat-ground equivalent.",
         &[
@@ -619,8 +648,12 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
             pace_series("Grade-adjusted", "s2", |s| s.grade_adjusted_pace),
         ],
         &PACE,
-    ));
-    out.push_str(&line_chart(
+    )
+}
+
+/// HR recovery after each run over time.
+fn recovery_chart(running: &[&Session]) -> String {
+    line_chart(
         "HR recovery",
         "Heartbeats per minute lost in the first minute of walking after a run. Higher is better.",
         &[Series {
@@ -638,9 +671,11 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
                 .collect(),
         }],
         &WHOLE,
-    ));
-    out.push_str("</div>\n");
+    )
+}
 
+/// Each route's sessions, climb, and early against late efficiency.
+fn routes_table(running: &[&Session]) -> String {
     let mut all_routes: Vec<Option<usize>> = running.iter().map(|s| s.route).collect();
     all_routes.sort();
     all_routes.dedup();
@@ -672,9 +707,12 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
             )
         })
         .collect();
-    if !rows.is_empty() {
-        out.push_str("<h3>Routes</h3>\n");
-        out.push_str(&table(
+    if rows.is_empty() {
+        return String::new();
+    }
+    format!(
+        "<h3>Routes</h3>\n{}",
+        table(
             &[
                 "Route",
                 "Sessions",
@@ -683,9 +721,8 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
                 "Efficiency, last 3",
             ],
             &rows,
-        ));
-    }
-    out
+        )
+    )
 }
 
 fn effort_cells(effort: Option<&Effort>) -> String {
@@ -923,11 +960,7 @@ fn passes_table(passes: &[Pass]) -> String {
     );
     for (i, pass) in passes.iter().enumerate() {
         let s = &pass.stats;
-        let class = match pass.class {
-            RUN => "run",
-            WALK => "walk",
-            other => other,
-        };
+        let class = pass.class;
         let label = if pass.excluded {
             format!("{class}, excluded")
         } else {

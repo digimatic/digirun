@@ -18,3 +18,21 @@ path = "src/lib.rs"
 [[bin]]
 name = "garmin-analyze"
 path = "src/main.rs"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cognitive_complexity = "warn"
+# Commonly allowed pedantic lints that are noise for this code:
+# a binary-first crate with deliberate f64 <-> integer conversions.
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+similar_names = "allow"
+struct_excessive_bools = "allow"
+format_push_string = "allow"
+format_collect = "allow"

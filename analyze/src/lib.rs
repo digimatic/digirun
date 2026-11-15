@@ -8,7 +8,6 @@
 //! Classification is threshold-based: pace is derived from position deltas (GPX has
 //! no speed field), cadence comes from the trackpoint extensions when present.
 
-pub mod analyze;
 pub mod args;
 pub mod csv;
 pub mod csvout;
@@ -25,6 +24,7 @@ pub mod parse;
 pub mod passes;
 pub mod report;
 pub mod routes;
+pub mod segments;
 pub mod serve;
 pub mod xml;
 
@@ -76,14 +76,14 @@ fn try_run(args: &Args) -> Result<i32, String> {
     let loaded_ids: BTreeSet<&str> = activities.iter().map(|a| a.activity_id.as_str()).collect();
 
     let refs: Vec<&Activity> = activities.iter().collect();
-    let (kept, type_skipped, type_unknown) = analyze::filter_activities(&refs, &args.types);
+    let (kept, type_skipped, type_unknown) = segments::filter_activities(&refs, &args.types);
     if kept.is_empty() {
         println!(
             "No activities left after the --type filter ({type_skipped} skipped, {type_unknown} unknown)."
         );
         return Ok(0);
     }
-    let mut dropped = Dropped {
+    let dropped = Dropped {
         type_skipped,
         type_unknown,
         ..Dropped::default()
@@ -98,7 +98,6 @@ fn try_run(args: &Args) -> Result<i32, String> {
                 .is_none_or(|ids| ids.contains(&a.activity_id))
         })
         .collect();
-    let reference = args.end.unwrap_or_else(dt::Date::today);
 
     if args.name_routes || args.serve {
         let mut metrics = named_metrics(&kept, args, &out_dir, &loaded_ids)?;
@@ -106,6 +105,7 @@ fn try_run(args: &Args) -> Result<i32, String> {
         if args.name_routes {
             return Ok(naming::run(&metrics, args, &path));
         }
+        let reference = args.end.unwrap_or_else(dt::Date::today);
         return Ok(serve::run(&mut serve::State::new(
             &mut metrics,
             args,
@@ -114,8 +114,21 @@ fn try_run(args: &Args) -> Result<i32, String> {
         )));
     }
 
+    report(args, &out_dir, &kept, &loaded_ids, &loaded.skipped, dropped)
+}
+
+/// Print the tables that were asked for, then write the CSVs and the HTML page.
+fn report(
+    args: &Args,
+    out_dir: &Path,
+    kept: &[&Activity],
+    loaded_ids: &BTreeSet<&str>,
+    skipped: &[String],
+    mut dropped: Dropped,
+) -> Result<i32, String> {
+    let reference = args.end.unwrap_or_else(dt::Date::today);
     let segments: Vec<Segment> = if args.show.segments() {
-        collect_segments(&kept, args)
+        collect_segments(kept, args)
     } else {
         Vec::new()
     };
@@ -123,7 +136,7 @@ fn try_run(args: &Args) -> Result<i32, String> {
     let mut kept_segments: Vec<&Segment> = Vec::new();
     if args.show.segments() {
         (kept_segments, dropped.slow_segments, dropped.fast_segments) =
-            analyze::filter_segments(&seg_refs, args);
+            segments::filter_segments(&seg_refs, args);
         if kept_segments.is_empty() {
             println!("No segments matched — try a smaller --window or a wider date range.");
             if !args.show.detail && args.html.is_none() {
@@ -135,7 +148,7 @@ fn try_run(args: &Args) -> Result<i32, String> {
     let detail: Vec<(&Activity, Vec<passes::Pass>)> = if args.show.detail {
         kept.iter()
             .copied()
-            .filter(|a| analyze::in_range(a, args))
+            .filter(|a| segments::in_range(a, args))
             .map(|a| (a, passes::build_passes(a, args)))
             .collect()
     } else {
@@ -143,14 +156,14 @@ fn try_run(args: &Args) -> Result<i32, String> {
     };
 
     let metrics = if args.show.metrics() || args.html.is_some() {
-        Some(named_metrics(&kept, args, &out_dir, &loaded_ids)?)
+        Some(named_metrics(kept, args, out_dir, loaded_ids)?)
     } else {
         None
     };
 
     report::print_header(args, &notes(args, &dropped));
     if !kept_segments.is_empty() {
-        report::print_report(&kept, &kept_segments, args);
+        report::print_report(kept, &kept_segments, args);
     }
     if args.show.detail {
         if detail.is_empty() {
@@ -163,13 +176,13 @@ fn try_run(args: &Args) -> Result<i32, String> {
     if let Some(metrics) = &metrics {
         report::print_metrics(metrics, args, reference);
     }
-    if !loaded.skipped.is_empty() {
+    if !skipped.is_empty() {
         println!();
-        println!("Skipped (no trackpoints): {}", loaded.skipped.join(", "));
+        println!("Skipped (no trackpoints): {}", skipped.join(", "));
     }
 
     if !args.no_csv {
-        write_csvs(args, &kept, &kept_segments, &detail, metrics.as_ref())?;
+        write_csvs(args, kept, &kept_segments, &detail, metrics.as_ref())?;
     }
     if let (Some(path), Some(metrics)) = (&args.html, &metrics) {
         let path = expanduser(path);
@@ -350,13 +363,13 @@ fn apply_route_names(
 fn collect_segments(activities: &[&Activity], args: &Args) -> Vec<Segment> {
     let mut segments: Vec<Segment> = Vec::new();
     for activity in activities {
-        if !analyze::in_range(activity, args) {
+        if !segments::in_range(activity, args) {
             continue;
         }
         if args.method == Method::Lap {
-            segments.extend(analyze::lap_segments(activity, args));
+            segments.extend(segments::lap_segments(activity, args));
         } else {
-            segments.extend(analyze::build_segments(activity, args));
+            segments.extend(segments::build_segments(activity, args));
         }
     }
     segments

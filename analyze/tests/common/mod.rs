@@ -182,7 +182,7 @@ pub fn shaped(corners: &[(f64, f64)]) -> Activity {
 }
 
 /// Two sessions on a home route, one far away, one without GPS; home named "Home".
-pub fn named_metrics<'a>(runs: &'a [Activity; 4]) -> garmin_analyze::metrics::Metrics<'a> {
+pub fn named_metrics(runs: &[Activity; 4]) -> garmin_analyze::metrics::Metrics<'_> {
     let refs: Vec<&Activity> = runs.iter().collect();
     let mut metrics = build(&refs, &Args::default());
     name_routes(&mut metrics, &parse_route_names("1 = Home").unwrap());

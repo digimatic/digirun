@@ -145,7 +145,7 @@ fn rename(request: &Request, state: &mut State) -> Response {
     let shown = name.unwrap_or_else(|| route.auto.clone());
     for session in &mut state.metrics.sessions {
         if session.route == Some(index) {
-            session.route_name = shown.clone();
+            session.route_name.clone_from(&shown);
         }
     }
     println!("{} is now {shown}", route.auto);

@@ -6,12 +6,12 @@
 
 use std::collections::BTreeMap;
 
-use crate::analyze::RUN;
 use crate::html::esc;
 use crate::metrics::{Session, typical_gain};
 use crate::model::{Activity, Point};
 use crate::num::upper_median;
 use crate::passes::Pass;
+use crate::segments::RUN;
 
 const METRES_PER_DEGREE: f64 = 111_320.0;
 /// A point closer than this to the last one drawn adds nothing but bytes.
@@ -69,7 +69,7 @@ impl Frame {
         let span_x = (high.0 - low.0).max(MIN_SPAN_M);
         let span_y = (high.1 - low.1).max(MIN_SPAN_M);
         Some(Frame {
-            centre: ((low.0 + high.0) / 2.0, (low.1 + high.1) / 2.0),
+            centre: (f64::midpoint(low.0, high.0), f64::midpoint(low.1, high.1)),
             size,
             scale: ((size.0 - 2.0 * pad) / span_x).min((size.1 - 2.0 * pad) / span_y),
         })
@@ -165,7 +165,7 @@ fn session_map_host(activity: &Activity, passes: &[Pass], cos_lat: f64) -> Strin
             .map(|pass| {
                 format!(
                     "[{},{}]",
-                    (pass.class == RUN) as u8,
+                    u8::from(pass.class == RUN),
                     positions_json(&activity.points[pass.start..=pass.end], cos_lat)
                 )
             })
@@ -208,9 +208,9 @@ pub(crate) fn session_map(activity: &Activity, passes: &[Pass], with_map: bool) 
             ));
         }
         for pass in passes {
-            let class = if pass.class == RUN { "run" } else { "walk" };
             body.push_str(&format!(
-                "<path class=\"track {class}\" d=\"{}\"/>\n",
+                "<path class=\"track {}\" d=\"{}\"/>\n",
+                pass.class,
                 path(&activity.points[pass.start..=pass.end], cos_lat, &frame)
             ));
         }
@@ -298,6 +298,27 @@ fn routes_of<'m, 'a>(sessions: &[&'m Session<'a>]) -> Vec<Route<'m, 'a>> {
     routes
 }
 
+/// A legend entry per route in colour, and one for all the others.
+fn overview_legend(shown: &[&Route], colours: &[(usize, &'static str)]) -> String {
+    let entries: String = shown
+        .iter()
+        .filter(|r| r.colour(colours) != "other")
+        .map(|r| {
+            format!(
+                "<span class=\"entry\"><span class=\"stroke {}\"></span>{}</span>",
+                r.colour(colours),
+                esc(r.name())
+            )
+        })
+        .collect();
+    let others = if shown.iter().any(|r| r.colour(colours) == "other") {
+        "<span class=\"entry\"><span class=\"stroke other\"></span>Other routes</span>"
+    } else {
+        ""
+    };
+    format!("{entries}{others}")
+}
+
 /// All the routes on one picture, leaving out any that start far from the rest.
 fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: bool) -> String {
     let starts: Vec<Point> = routes
@@ -353,22 +374,7 @@ fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: b
     body.push_str(&hits);
     body.push_str(&scale_bar(&frame, OVERVIEW_SIZE));
 
-    let entries: String = shown
-        .iter()
-        .filter(|r| r.colour(colours) != "other")
-        .map(|r| {
-            format!(
-                "<span class=\"entry\"><span class=\"stroke {}\"></span>{}</span>",
-                r.colour(colours),
-                esc(r.name())
-            )
-        })
-        .collect();
-    let others = if shown.iter().any(|r| r.colour(colours) == "other") {
-        "<span class=\"entry\"><span class=\"stroke other\"></span>Other routes</span>"
-    } else {
-        ""
-    };
+    let keys = overview_legend(&shown, colours);
     let left_out = routes.len() - shown.len();
     let note = if left_out > 0 {
         format!(
@@ -405,7 +411,7 @@ fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: b
         ("", String::new())
     };
     format!(
-        "<figure class=\"chart overview-map{has_map}\"><div class=\"legend\">{entries}{others}</div>{}{host}{note}</figure>\n",
+        "<figure class=\"chart overview-map{has_map}\"><div class=\"legend\">{keys}</div>{}{host}{note}</figure>\n",
         svg(OVERVIEW_SIZE, "All routes", &body)
     )
 }

@@ -14,7 +14,10 @@ cargo test --manifest-path analyze/Cargo.toml
 
 CI (`.github/workflows/analyze.yml`) also requires `cargo fmt --check` and
 `cargo clippy --all-targets -- -D warnings` to pass, with the toolchain pinned
-in `rust-toolchain.toml`.
+in `rust-toolchain.toml`. Clippy runs with the `pedantic` group and
+`cognitive_complexity` on (`[lints.clippy]` in `Cargo.toml`, a few noisy lints
+allowed there), and its 100-line and complexity-25 limits are in `clippy.toml`.
+An `#[allow]` in the code says why it is there.
 
 Run it from the repo root, because the default `--out` is `./runs`:
 
@@ -321,7 +324,7 @@ local `Host`.
 | `src/parse.rs` | `read_gpx` / `read_tcx` |
 | `src/xml.rs` | small namespace-agnostic DOM |
 | `src/model.rs` | `Point`, `Activity`, `Segment`, haversine |
-| `src/analyze.rs` | classification, segmentation, stats, filters |
+| `src/segments.rs` | classification, segmentation, stats, filters |
 | `src/passes.rs` | the detail table: cadence-split passes and their stats |
 | `src/metrics.rs` | session and week metrics: load, zones, fitness, efforts |
 | `src/routes.rs` | grouping tracks into routes, describing them, applying `routes.txt` |

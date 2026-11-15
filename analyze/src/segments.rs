@@ -141,6 +141,15 @@ pub fn lap_segments(activity: &Activity, args: &Args) -> Vec<Segment> {
     segments
 }
 
+/// The segments of one class.
+pub fn of_class<'s>(segments: &[&'s Segment], class: &str) -> Vec<&'s Segment> {
+    segments
+        .iter()
+        .copied()
+        .filter(|s| s.class == class)
+        .collect()
+}
+
 /// Pace (total time / total distance) and the stdev of the segment paces, plus
 /// cadence where the segments have it.
 ///
@@ -217,7 +226,7 @@ pub fn filter_activities<'a>(
     }
 }
 
-/// Drop segments outside the pace window; returns (kept, dropped_slow, dropped_fast).
+/// Drop segments outside the pace window; returns (kept, `dropped_slow`, `dropped_fast`).
 pub fn filter_segments<'a>(
     segments: &'a [&'a Segment],
     args: &Args,

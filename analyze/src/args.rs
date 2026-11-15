@@ -179,20 +179,13 @@ pub struct Args {
 /// Worker threads used to parse the files.
 pub fn default_jobs() -> usize {
     std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
+        .map_or(1, std::num::NonZero::get)
         .min(8)
 }
 
 /// The types analyzed by default; `--type all` turns the filter off.
 fn default_types() -> Option<BTreeSet<String>> {
-    Some(
-        DEFAULT_TYPES
-            .split(',')
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
-            .collect(),
-    )
+    list(DEFAULT_TYPES)
 }
 
 impl Default for Args {
@@ -308,7 +301,7 @@ struct Action {
 impl Action {
     fn new(strings: &[&str], metavar: &str, help: String) -> Action {
         Action {
-            strings: strings.iter().map(|s| s.to_string()).collect(),
+            strings: strings.iter().map(ToString::to_string).collect(),
             metavar: metavar.to_string(),
             help,
         }
@@ -326,7 +319,7 @@ impl Action {
 
     /// How the action appears in the usage line: the first option string only.
     fn usage_part(&self) -> String {
-        let first = self.strings.first().map(|s| s.as_str()).unwrap_or_default();
+        let first = self.strings.first().map_or_default(String::as_str);
         if self.metavar.is_empty() {
             format!("[{first}]")
         } else {
@@ -341,6 +334,7 @@ struct Group {
 }
 
 /// The help groups, in the order argparse prints them.
+#[allow(clippy::too_many_lines)] // the help text of every option, as data
 fn groups() -> Vec<Group> {
     let jobs = default_jobs();
     // argparse joins choices in the metavar without spaces.
@@ -579,7 +573,7 @@ pub fn usage() -> String {
     let parts: Vec<String> = action_groups
         .iter()
         .flat_map(|group| group.actions.iter())
-        .map(|action| action.usage_part())
+        .map(Action::usage_part)
         .collect();
     let width = format_width();
     let prefix = "usage: ";
@@ -687,6 +681,7 @@ pub fn parse(argv: &[String]) -> Result<Args, CliError> {
 }
 
 /// `parse`, with the date `--days` counts back from when there is no `--end`.
+#[allow(clippy::too_many_lines)] // one short match arm per option
 pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> {
     let mut args = Args::default();
     let mut i = 0;
@@ -727,7 +722,8 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                 let raw = value(&mut i)?;
                 args.types = if raw == "all" { None } else { list(&raw) };
             }
-            "--jobs" => args.jobs = int::<i64>(flag, &value(&mut i)?)? as usize,
+            // Under 1 runs single-threaded; clamped before the cast so -3 does not wrap.
+            "--jobs" => args.jobs = int::<i64>(flag, &value(&mut i)?)?.max(1) as usize,
             "--method" => {
                 let raw = value(&mut i)?;
                 args.method = match raw.as_str() {
@@ -768,10 +764,10 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
             "--gap" => args.gap = int(flag, &value(&mut i)?)?,
             // Python treats a pace guard of 0 as "not set", so the same is done here.
             "--max-pace" => {
-                args.max_pace = Some(parse_pace(&value(&mut i)?, "max pace")?).filter(|v| *v != 0)
+                args.max_pace = Some(parse_pace(&value(&mut i)?, "max pace")?).filter(|v| *v != 0);
             }
             "--min-pace" => {
-                args.min_pace = Some(parse_pace(&value(&mut i)?, "min pace")?).filter(|v| *v != 0)
+                args.min_pace = Some(parse_pace(&value(&mut i)?, "min pace")?).filter(|v| *v != 0);
             }
             "--report-dir" => args.report_dir = PathBuf::from(value(&mut i)?),
             "--cadence-stats" => args.cadence_stats = true,
@@ -842,7 +838,6 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
         i += 1;
     }
 
-    args.jobs = args.jobs.max(1);
     if args.map && args.html.is_none() && !args.serve {
         return Err(CliError::argument(
             "argument --map: needs --html or --serve",

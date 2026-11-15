@@ -52,7 +52,7 @@ pub fn recent_routes(metrics: &Metrics, args: &Args) -> Vec<RecentRoute> {
         });
         route.sessions += 1;
         route.last = s.activity.date;
-        route.newest_id = s.activity.activity_id.clone();
+        route.newest_id.clone_from(&s.activity.activity_id);
     }
     let mut routes: Vec<RecentRoute> = routes.into_values().collect();
     routes.sort_by(|a, b| b.last.cmp(&a.last).then(a.index.cmp(&b.index)));
