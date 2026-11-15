@@ -28,7 +28,7 @@ pub mod routes;
 pub mod serve;
 pub mod xml;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::args::{Args, Method};
@@ -36,13 +36,31 @@ use crate::model::{Activity, Segment};
 
 /// Run the analysis and return the exit code.
 pub fn run(args: &Args) -> i32 {
+    match try_run(args) {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("error: {error}");
+            1
+        }
+    }
+}
+
+/// What the filters left out, for the notes above the tables.
+#[derive(Default)]
+struct Dropped {
+    type_skipped: usize,
+    type_unknown: usize,
+    slow_segments: usize,
+    fast_segments: usize,
+}
+
+fn try_run(args: &Args) -> Result<i32, String> {
     let out_dir = expanduser(&args.out);
     if !out_dir.is_dir() {
-        eprintln!(
-            "error: {} is not a directory (run garmin-runs first)",
+        return Err(format!(
+            "{} is not a directory (run garmin-runs first)",
             out_dir.display()
-        );
-        return 1;
+        ));
     }
 
     let loaded = load::load_activities(&out_dir, args.jobs);
@@ -51,37 +69,25 @@ pub fn run(args: &Args) -> i32 {
     }
     if loaded.activities.is_empty() {
         println!("No activities with trackpoints found.");
-        return 0;
+        return Ok(0);
     }
-
     let mut activities = loaded.activities;
-    let wanted = &args.types;
-    let type_map = if wanted.is_some() {
-        load::activity_types(&out_dir)
-    } else {
-        BTreeMap::new()
-    };
-    if wanted.is_some() && type_map.is_empty() {
-        eprintln!(
-            "warning: no summary.csv in {}, activity types cannot be checked",
-            out_dir.display()
-        );
-    }
-    for activity in &mut activities {
-        activity.r#type = type_map
-            .get(&activity.activity_id)
-            .cloned()
-            .unwrap_or_default();
-    }
+    set_types(&mut activities, args, &out_dir);
+    let loaded_ids: BTreeSet<&str> = activities.iter().map(|a| a.activity_id.as_str()).collect();
 
     let refs: Vec<&Activity> = activities.iter().collect();
-    let (kept, type_skipped, type_unknown) = analyze::filter_activities(&refs, wanted);
+    let (kept, type_skipped, type_unknown) = analyze::filter_activities(&refs, &args.types);
     if kept.is_empty() {
         println!(
             "No activities left after the --type filter ({type_skipped} skipped, {type_unknown} unknown)."
         );
-        return 0;
+        return Ok(0);
     }
+    let mut dropped = Dropped {
+        type_skipped,
+        type_unknown,
+        ..Dropped::default()
+    };
 
     // --activity narrows every table; the date range is applied per table below.
     let kept: Vec<&Activity> = kept
@@ -92,35 +98,36 @@ pub fn run(args: &Args) -> i32 {
                 .is_none_or(|ids| ids.contains(&a.activity_id))
         })
         .collect();
+    let reference = args.end.unwrap_or_else(dt::Date::today);
 
     if args.name_routes || args.serve {
-        let mut metrics = metrics::build(&kept, args);
-        let loaded: BTreeSet<&str> = activities.iter().map(|a| a.activity_id.as_str()).collect();
-        if let Err(error) = name_routes(&mut metrics, args, &out_dir, &loaded) {
-            eprintln!("error: {error}");
-            return 1;
-        }
+        let mut metrics = named_metrics(&kept, args, &out_dir, &loaded_ids)?;
         let path = route_names_path(args, &out_dir);
         if args.name_routes {
-            return naming::run(&metrics, args, &path);
+            return Ok(naming::run(&metrics, args, &path));
         }
-        let reference = args.end.unwrap_or_else(dt::Date::today);
-        return serve::run(&mut serve::State::new(&mut metrics, args, path, reference));
+        return Ok(serve::run(&mut serve::State::new(
+            &mut metrics,
+            args,
+            path,
+            reference,
+        )));
     }
 
-    let mut segments: Vec<Segment> = Vec::new();
-    let (mut dropped_slow, mut dropped_fast) = (0, 0);
+    let segments: Vec<Segment> = if args.show.segments() {
+        collect_segments(&kept, args)
+    } else {
+        Vec::new()
+    };
+    let seg_refs: Vec<&Segment> = segments.iter().collect();
     let mut kept_segments: Vec<&Segment> = Vec::new();
     if args.show.segments() {
-        segments = collect_segments(&kept, args);
-    }
-    let seg_refs: Vec<&Segment> = segments.iter().collect();
-    if args.show.segments() {
-        (kept_segments, dropped_slow, dropped_fast) = analyze::filter_segments(&seg_refs, args);
+        (kept_segments, dropped.slow_segments, dropped.fast_segments) =
+            analyze::filter_segments(&seg_refs, args);
         if kept_segments.is_empty() {
             println!("No segments matched — try a smaller --window or a wider date range.");
             if !args.show.detail && args.html.is_none() {
-                return 0;
+                return Ok(0);
             }
         }
     }
@@ -135,85 +142,13 @@ pub fn run(args: &Args) -> i32 {
         Vec::new()
     };
 
-    let reference = args.end.unwrap_or_else(dt::Date::today);
-    let mut metrics =
-        (args.show.metrics() || args.html.is_some()).then(|| metrics::build(&kept, args));
-    if let Some(metrics) = &mut metrics {
-        let loaded: BTreeSet<&str> = activities.iter().map(|a| a.activity_id.as_str()).collect();
-        if let Err(error) = name_routes(metrics, args, &out_dir, &loaded) {
-            eprintln!("error: {error}");
-            return 1;
-        }
-    }
-
-    let mut notes: Vec<String> = Vec::new();
-    let range = match (args.start, args.end) {
-        (Some(s), Some(e)) => Some(format!("{s} to {e}")),
-        (Some(s), None) => Some(format!("from {s}")),
-        (None, Some(e)) => Some(format!("up to {e}")),
-        (None, None) => None,
+    let metrics = if args.show.metrics() || args.html.is_some() {
+        Some(named_metrics(&kept, args, &out_dir, &loaded_ids)?)
+    } else {
+        None
     };
-    if let Some(mut range) = range {
-        if let Some(days) = args.days {
-            range.push_str(&format!(" (last {days} days)"));
-        }
-        notes.push(format!("Range: {range}"));
-    }
-    if let Some(ids) = &args.activities {
-        notes.push(format!(
-            "Activities: {}",
-            ids.iter().cloned().collect::<Vec<_>>().join(", ")
-        ));
-    }
-    if let Some(wanted) = wanted {
-        let types = wanted.iter().cloned().collect::<Vec<_>>().join(", ");
-        let mut parts: Vec<String> = Vec::new();
-        if type_skipped > 0 {
-            parts.push(format!("{type_skipped} skipped"));
-        }
-        if type_unknown > 0 {
-            parts.push(format!("{type_unknown} skipped, type unknown"));
-        }
-        let mut note = format!("Types: {types}");
-        if !parts.is_empty() {
-            note.push_str(&format!(" ({})", parts.join(", ")));
-        }
-        notes.push(note);
-    }
-    if let Some(max) = args.max_pace {
-        let mut note = format!(
-            "Max pace: slower than {}/km excluded",
-            format::fmt_pace(max as f64)
-        );
-        if args.show.segments() {
-            note.push_str(&format!(" ({dropped_slow} segments)"));
-        }
-        notes.push(note);
-    }
-    if let Some(min) = args.min_pace {
-        let mut note = format!(
-            "Min pace: faster than {}/km excluded",
-            format::fmt_pace(min as f64)
-        );
-        if args.show.segments() {
-            note.push_str(&format!(" ({dropped_fast} segments)"));
-        }
-        notes.push(note);
-    }
-    if args.cadence_stats && args.show.segments() {
-        notes.push("Cadence columns are mean + stdev in strides/min".to_string());
-    }
-    if let Some(bpm) = args.hr_max.filter(|_| args.show.metrics()) {
-        notes.push(format!("HR max: {bpm} bpm"));
-    }
-    if args.show.detail {
-        notes.push(format!(
-            "Passes: cadence median over {}s, passes under {}s join a neighbour",
-            args.smooth, args.min_pass
-        ));
-    }
 
-    report::print_header(args, &notes);
+    report::print_header(args, &notes(args, &dropped));
     if !kept_segments.is_empty() {
         report::print_report(&kept, &kept_segments, args);
     }
@@ -234,36 +169,139 @@ pub fn run(args: &Args) -> i32 {
     }
 
     if !args.no_csv {
-        let report_dir = expanduser(&args.report_dir);
-        if !kept_segments.is_empty() {
-            if let Err(error) = csvout::write_csvs(&report_dir, &kept, &kept_segments, args) {
-                eprintln!("error: {error}");
-                return 1;
-            }
-        }
-        if !detail.is_empty() {
-            if let Err(error) = csvout::write_passes(&report_dir, &detail) {
-                eprintln!("error: {error}");
-                return 1;
-            }
-        }
-        if let Some(metrics) = metrics.as_ref().filter(|_| args.show.metrics()) {
-            if let Err(error) = csvout::write_metrics(&report_dir, metrics, args) {
-                eprintln!("error: {error}");
-                return 1;
-            }
-        }
+        write_csvs(args, &kept, &kept_segments, &detail, metrics.as_ref())?;
     }
     if let (Some(path), Some(metrics)) = (&args.html, &metrics) {
         let path = expanduser(path);
-        if let Err(error) = html::write_report(&path, metrics, args, reference) {
-            eprintln!("error: {error}");
-            return 1;
-        }
+        html::write_report(&path, metrics, args, reference)?;
         println!();
         println!("Wrote {}", path.display());
     }
-    0
+    Ok(0)
+}
+
+/// Give each activity its type from summary.csv, when --type needs them.
+fn set_types(activities: &mut [Activity], args: &Args, out_dir: &Path) {
+    if args.types.is_none() {
+        return;
+    }
+    let type_map = load::activity_types(out_dir);
+    if type_map.is_empty() {
+        eprintln!(
+            "warning: no summary.csv in {}, activity types cannot be checked",
+            out_dir.display()
+        );
+    }
+    for activity in activities {
+        activity.r#type = type_map
+            .get(&activity.activity_id)
+            .cloned()
+            .unwrap_or_default();
+    }
+}
+
+/// The metrics, with the routes named from routes.txt.
+fn named_metrics<'a>(
+    kept: &[&'a Activity],
+    args: &Args,
+    out_dir: &Path,
+    loaded_ids: &BTreeSet<&str>,
+) -> Result<metrics::Metrics<'a>, String> {
+    let mut metrics = metrics::build(kept, args);
+    apply_route_names(&mut metrics, args, out_dir, loaded_ids)?;
+    Ok(metrics)
+}
+
+/// The lines above the tables that say which filters and settings apply.
+fn notes(args: &Args, dropped: &Dropped) -> Vec<String> {
+    let mut notes: Vec<String> = Vec::new();
+    let range = match (args.start, args.end) {
+        (Some(s), Some(e)) => Some(format!("{s} to {e}")),
+        (Some(s), None) => Some(format!("from {s}")),
+        (None, Some(e)) => Some(format!("up to {e}")),
+        (None, None) => None,
+    };
+    if let Some(mut range) = range {
+        if let Some(days) = args.days {
+            range.push_str(&format!(" (last {days} days)"));
+        }
+        notes.push(format!("Range: {range}"));
+    }
+    if let Some(ids) = &args.activities {
+        notes.push(format!(
+            "Activities: {}",
+            ids.iter().cloned().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if let Some(wanted) = &args.types {
+        let types = wanted.iter().cloned().collect::<Vec<_>>().join(", ");
+        let mut parts: Vec<String> = Vec::new();
+        if dropped.type_skipped > 0 {
+            parts.push(format!("{} skipped", dropped.type_skipped));
+        }
+        if dropped.type_unknown > 0 {
+            parts.push(format!("{} skipped, type unknown", dropped.type_unknown));
+        }
+        let mut note = format!("Types: {types}");
+        if !parts.is_empty() {
+            note.push_str(&format!(" ({})", parts.join(", ")));
+        }
+        notes.push(note);
+    }
+    if let Some(max) = args.max_pace {
+        let mut note = format!(
+            "Max pace: slower than {}/km excluded",
+            format::fmt_pace(max as f64)
+        );
+        if args.show.segments() {
+            note.push_str(&format!(" ({} segments)", dropped.slow_segments));
+        }
+        notes.push(note);
+    }
+    if let Some(min) = args.min_pace {
+        let mut note = format!(
+            "Min pace: faster than {}/km excluded",
+            format::fmt_pace(min as f64)
+        );
+        if args.show.segments() {
+            note.push_str(&format!(" ({} segments)", dropped.fast_segments));
+        }
+        notes.push(note);
+    }
+    if args.cadence_stats && args.show.segments() {
+        notes.push("Cadence columns are mean + stdev in strides/min".to_string());
+    }
+    if let Some(bpm) = args.hr_max.filter(|_| args.show.metrics()) {
+        notes.push(format!("HR max: {bpm} bpm"));
+    }
+    if args.show.detail {
+        notes.push(format!(
+            "Passes: cadence median over {}s, passes under {}s join a neighbour",
+            args.smooth, args.min_pass
+        ));
+    }
+    notes
+}
+
+/// The CSVs of the tables that were shown, in --report-dir.
+fn write_csvs(
+    args: &Args,
+    kept: &[&Activity],
+    kept_segments: &[&Segment],
+    detail: &[(&Activity, Vec<passes::Pass>)],
+    metrics: Option<&metrics::Metrics>,
+) -> Result<(), String> {
+    let report_dir = expanduser(&args.report_dir);
+    if !kept_segments.is_empty() {
+        csvout::write_csvs(&report_dir, kept, kept_segments, args)?;
+    }
+    if !detail.is_empty() {
+        csvout::write_passes(&report_dir, detail)?;
+    }
+    if let Some(metrics) = metrics.filter(|_| args.show.metrics()) {
+        csvout::write_metrics(&report_dir, metrics, args)?;
+    }
+    Ok(())
 }
 
 /// routes.txt in --out, unless --route-names names another file.
@@ -275,11 +313,11 @@ fn route_names_path(args: &Args, out_dir: &Path) -> PathBuf {
 }
 
 /// Apply routes.txt to the routes, warning about lines that name nothing.
-fn name_routes(
+fn apply_route_names(
     metrics: &mut metrics::Metrics,
     args: &Args,
     out_dir: &Path,
-    loaded: &BTreeSet<&str>,
+    loaded_ids: &BTreeSet<&str>,
 ) -> Result<(), String> {
     let path = route_names_path(args, out_dir);
     let text = match std::fs::read_to_string(&path) {
@@ -299,7 +337,7 @@ fn name_routes(
     for id in naming
         .unmatched
         .iter()
-        .filter(|id| !loaded.contains(id.as_str()))
+        .filter(|id| !loaded_ids.contains(id.as_str()))
     {
         eprintln!("warning: {}: no activity {id}", path.display());
     }
