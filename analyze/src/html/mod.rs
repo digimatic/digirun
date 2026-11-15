@@ -546,6 +546,17 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
         .copied()
         .filter(|s| s.run_s > 0.0)
         .collect();
+    let mut out = String::from("<div class=\"charts\">\n");
+    out.push_str(&efficiency_chart(&running, routes));
+    out.push_str(&pace_chart(&running));
+    out.push_str(&recovery_chart(&running));
+    out.push_str("</div>\n");
+    out.push_str(&routes_table(&running));
+    out
+}
+
+/// Efficiency over time, one line per charted route.
+fn efficiency_chart(running: &[&Session], routes: &[(usize, &'static str)]) -> String {
     let series: Vec<Series> = routes
         .iter()
         .map(|&(route, class)| {
@@ -580,14 +591,16 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
         })
         .collect();
 
-    let mut out = String::from("<div class=\"charts\">\n");
-    out.push_str(&line_chart(
+    line_chart(
         "Efficiency",
         "Metres per minute for each heartbeat per minute, on the 3 most used routes. Higher is better.",
         &series,
         &TWO_DECIMALS,
-    ));
+    )
+}
 
+/// Run pace and grade-adjusted pace over time.
+fn pace_chart(running: &[&Session]) -> String {
     let pace_tip = |s: &Session| {
         format!(
             "{}\npace {}\ngrade-adjusted {}",
@@ -610,7 +623,7 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
             })
             .collect(),
     };
-    out.push_str(&line_chart(
+    line_chart(
         "Run pace",
         "Minutes per kilometre, faster at the top. Grade-adjusted pace is the flat-ground equivalent.",
         &[
@@ -618,8 +631,12 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
             pace_series("Grade-adjusted", "s2", |s| s.grade_adjusted_pace),
         ],
         &PACE,
-    ));
-    out.push_str(&line_chart(
+    )
+}
+
+/// HR recovery after each run over time.
+fn recovery_chart(running: &[&Session]) -> String {
+    line_chart(
         "HR recovery",
         "Heartbeats per minute lost in the first minute of walking after a run. Higher is better.",
         &[Series {
@@ -637,9 +654,11 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
                 .collect(),
         }],
         &WHOLE,
-    ));
-    out.push_str("</div>\n");
+    )
+}
 
+/// Each route's sessions, climb, and early against late efficiency.
+fn routes_table(running: &[&Session]) -> String {
     let mut all_routes: Vec<Option<usize>> = running.iter().map(|s| s.route).collect();
     all_routes.sort();
     all_routes.dedup();
@@ -671,9 +690,12 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
             )
         })
         .collect();
-    if !rows.is_empty() {
-        out.push_str("<h3>Routes</h3>\n");
-        out.push_str(&table(
+    if rows.is_empty() {
+        return String::new();
+    }
+    format!(
+        "<h3>Routes</h3>\n{}",
+        table(
             &[
                 "Route",
                 "Sessions",
@@ -682,9 +704,8 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
                 "Efficiency, last 3",
             ],
             &rows,
-        ));
-    }
-    out
+        )
+    )
 }
 
 fn effort_cells(effort: Option<&Effort>) -> String {
