@@ -16,12 +16,12 @@ use crate::dt::Date;
 use crate::format::{change, duration_or_dash, fmt_duration, fmt_pace};
 use crate::map::{routes_section, session_map};
 use crate::metrics::{
-    EFFORT_DISTANCES_M, Effort, Metrics, RUNNING_EFFORT_SHARE, Session, Week, ZONES,
-    prediction_source, previous_weeks, riegel, sessions_in_range, vdot,
+    EFFORT_DISTANCES_M, Effort, Metrics, RUNNING_EFFORT_SHARE, Session, Week, ZONES, fastest,
+    km_load, prediction_source, previous_weeks, riegel, sessions_in_range, trimp_load,
+    typical_gain, vdot,
 };
 use crate::num::mean_of;
 use crate::passes::{Pass, build_passes};
-use crate::report::{fastest, km_load, trimp_load, typical_gain};
 
 const CSS: &str = include_str!("report.css");
 const JS: &str = include_str!("report.js");

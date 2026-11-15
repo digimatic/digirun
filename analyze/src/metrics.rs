@@ -10,7 +10,7 @@ use crate::analyze::{RUN, WALK, in_range};
 use crate::args::Args;
 use crate::dt::Date;
 use crate::model::{Activity, Point, haversine};
-use crate::num::median;
+use crate::num::{median, upper_median};
 use crate::passes::{Pass, Step, build_passes, offsets, smoothed_altitude, steps, totals};
 
 pub const ZONES: usize = 5;
@@ -735,6 +735,36 @@ pub fn acute_chronic(samples: &[(Date, f64)], reference: Date) -> Load {
         baseline,
         ratio: (enough && baseline > 0.0).then(|| acute / baseline),
     }
+}
+
+/// Kilometres run, acute against chronic.
+pub(crate) fn km_load(metrics: &Metrics, reference: Date) -> Load {
+    let samples: Vec<(Date, f64)> = metrics
+        .sessions
+        .iter()
+        .map(|s| (s.activity.date, s.km()))
+        .collect();
+    acute_chronic(&samples, reference)
+}
+
+/// TRIMP, acute against chronic, from the sessions with heart rate.
+pub(crate) fn trimp_load(metrics: &Metrics, reference: Date) -> Load {
+    let samples: Vec<(Date, f64)> = metrics
+        .sessions
+        .iter()
+        .filter_map(|s| s.trimp.map(|value| (s.activity.date, value)))
+        .collect();
+    acute_chronic(&samples, reference)
+}
+
+/// The median elevation gain of these sessions.
+pub(crate) fn typical_gain(sessions: &[&Session]) -> Option<f64> {
+    upper_median(sessions.iter().filter_map(|s| s.elev_gain).collect())
+}
+
+/// The effort with the shortest time.
+pub(crate) fn fastest<'e>(efforts: impl Iterator<Item = &'e Effort>) -> Option<&'e Effort> {
+    efforts.min_by(|a, b| a.time_s.total_cmp(&b.time_s))
 }
 
 /// The effort predictions are made from: within the last 90 days, at least 3 km,

@@ -8,8 +8,9 @@ use crate::args::{AMBIGUOUS_CADENCE, Args, Method};
 use crate::dt::Date;
 use crate::format::{change, duration_or_dash, fmt_duration, fmt_pace, py_num};
 use crate::metrics::{
-    EFFORT_DISTANCES_M, Effort, Load, Metrics, RUNNING_EFFORT_SHARE, Session, ZONES, acute_chronic,
-    prediction_source, previous_weeks, riegel, sessions_in_range, vdot,
+    EFFORT_DISTANCES_M, Effort, Load, Metrics, RUNNING_EFFORT_SHARE, Session, ZONES, fastest,
+    km_load, prediction_source, previous_weeks, riegel, sessions_in_range, trimp_load,
+    typical_gain, vdot,
 };
 use crate::model::{Activity, Segment, Stats};
 use crate::num::{mean_of, round_int};
@@ -497,24 +498,6 @@ fn load_line(label: &str, load: Load, unit: &str) -> String {
     )
 }
 
-pub(crate) fn km_load(metrics: &Metrics, reference: Date) -> Load {
-    let samples: Vec<(Date, f64)> = metrics
-        .sessions
-        .iter()
-        .map(|s| (s.activity.date, s.km()))
-        .collect();
-    acute_chronic(&samples, reference)
-}
-
-pub(crate) fn trimp_load(metrics: &Metrics, reference: Date) -> Load {
-    let samples: Vec<(Date, f64)> = metrics
-        .sessions
-        .iter()
-        .filter_map(|s| s.trimp.map(|value| (s.activity.date, value)))
-        .collect();
-    acute_chronic(&samples, reference)
-}
-
 fn print_zones(metrics: &Metrics, args: &Args, reference: Date) {
     println!();
     println!("HR zones (minutes)");
@@ -552,13 +535,6 @@ fn print_zones(metrics: &Metrics, args: &Args, reference: Date) {
         load_line("TRIMP", trimp_load(metrics, reference), "pts")
     );
     println!("{}", load_line("Volume", km_load(metrics, reference), "km"));
-}
-
-/// The median elevation gain of these sessions.
-pub(crate) fn typical_gain(sessions: &[&Session]) -> Option<f64> {
-    let mut gains: Vec<f64> = sessions.iter().filter_map(|s| s.elev_gain).collect();
-    gains.sort_by(f64::total_cmp);
-    gains.get(gains.len() / 2).copied()
 }
 
 fn print_fitness(metrics: &Metrics, args: &Args) {
@@ -623,10 +599,6 @@ fn effort_cells(effort: Option<&Effort>) -> String {
         ),
         None => format!("{:>8} {:>6} {:<10} {:>5}", "-", "-", "-", "-"),
     }
-}
-
-pub(crate) fn fastest<'e>(efforts: impl Iterator<Item = &'e Effort>) -> Option<&'e Effort> {
-    efforts.min_by(|a, b| a.time_s.total_cmp(&b.time_s))
 }
 
 fn print_efforts(metrics: &Metrics, args: &Args, reference: Date) {
