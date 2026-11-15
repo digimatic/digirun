@@ -13,14 +13,17 @@ use garmin_analyze::html::render;
 use garmin_analyze::load::{activity_types, load_activities};
 use garmin_analyze::map::Frame;
 use garmin_analyze::metrics::{
-    Naming, acute_chronic, assign_routes, build, describe_route, hr_zone, minetti_cost,
-    name_routes, parse_route_names, prediction_source, previous_weeks, riegel, trimp, vdot,
+    acute_chronic, build, hr_zone, minetti_cost, prediction_source, previous_weeks, riegel, trimp,
+    vdot,
 };
 use garmin_analyze::model::{Activity, Lap, Point, Segment, haversine};
 use garmin_analyze::naming::{Change, ask, recent_routes, rewrite};
 use garmin_analyze::num::round;
 use garmin_analyze::parse::{read_gpx, read_tcx};
 use garmin_analyze::passes::{Source, build_passes, climbs};
+use garmin_analyze::routes::{
+    Naming, assign_routes, describe_route, name_routes, parse_route_names,
+};
 use garmin_analyze::serve::{Request, State, decode_form, handle};
 use garmin_analyze::xml;
 

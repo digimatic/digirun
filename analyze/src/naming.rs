@@ -6,7 +6,8 @@ use std::path::Path;
 
 use crate::args::Args;
 use crate::dt::Date;
-use crate::metrics::{Metrics, describe_route, parse_route_names, sessions_in_range};
+use crate::metrics::{Metrics, sessions_in_range};
+use crate::routes::{describe_route, parse_route_names};
 
 /// A route with a session in the range, as offered for naming.
 #[derive(Debug, Clone, PartialEq)]

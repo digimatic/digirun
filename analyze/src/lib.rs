@@ -24,6 +24,7 @@ pub mod num;
 pub mod parse;
 pub mod passes;
 pub mod report;
+pub mod routes;
 pub mod serve;
 pub mod xml;
 
@@ -292,9 +293,8 @@ fn name_routes(
         }
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    let names =
-        metrics::parse_route_names(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-    let naming = metrics::name_routes(metrics, &names);
+    let names = routes::parse_route_names(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let naming = routes::name_routes(metrics, &names);
     // An activity left out by --type, --activity or --end is not a mistake.
     for id in naming
         .unmatched
