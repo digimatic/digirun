@@ -20,8 +20,7 @@ use crate::metrics::{
 };
 use crate::passes::{Pass, build_passes};
 use crate::report::{
-    change, fastest, fmt_duration, fmt_pace, km_load, mean_of, route_label, trimp_load,
-    typical_gain,
+    change, fastest, fmt_duration, fmt_pace, km_load, mean_of, trimp_load, typical_gain,
 };
 
 const CSS: &str = include_str!("report.css");
@@ -111,7 +110,8 @@ pub fn render(metrics: &Metrics, args: &Args, reference: Date) -> String {
         "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
          <title>Running report</title>\n{map_head}<style>\n{CSS}</style>\n</head>\n\
-         <body data-range=\"{default_range}\">\n"
+         <body data-range=\"{default_range}\"{editable}>\n",
+        editable = if args.serve { " data-editable" } else { "" }
     ));
     page.push_str(&header(&sessions, args));
     page.push_str(&nav(default_range, args.map));
@@ -149,10 +149,16 @@ pub fn render(metrics: &Metrics, args: &Args, reference: Date) -> String {
         out.push_str(&predictions(metrics, reference));
     }));
     page.push_str(&section("routes", "Routes", |out| {
-        out.push_str(
+        let naming = if args.serve {
+            "Rename a route with its \u{270e} button."
+        } else {
+            "Name a route by adding <code>&lt;activity id&gt; = &lt;name&gt;</code> to routes.txt \
+             in the downloads folder; hover a card for an id."
+        };
+        out.push_str(&format!(
             "<p class=\"note\">Each route is drawn from its newest session, north up. Click a card \
-             for its sessions.</p>\n",
-        );
+             for its sessions. {naming}</p>\n"
+        ));
         for view in &views {
             out.push_str(&in_view(
                 view,
@@ -568,7 +574,11 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
             let gain =
                 typical_gain(&rows).map_or(String::new(), |g| format!(", about {g:.0} m climb"));
             Series {
-                name: format!("{}{gain}", route_label(Some(route))),
+                // A route with no sessions in this view is left out of the legend.
+                name: format!(
+                    "{}{gain}",
+                    rows.first().map_or("", |s| s.route_name.as_str())
+                ),
                 class,
                 points: rows
                     .iter()
@@ -578,8 +588,7 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
                             y: ef,
                             tip: format!(
                                 "{}\n{}\nefficiency {ef:.2}",
-                                s.activity.date,
-                                route_label(s.route)
+                                s.activity.date, s.route_name
                             ),
                         })
                     })
@@ -671,7 +680,7 @@ fn fitness(view: &View, routes: &[(usize, &'static str)]) -> String {
             let two = |v: f64| format!("{v:.2}");
             format!(
                 "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-                esc(&route_label(*route)),
+                esc(&rows[0].route_name),
                 rows.len(),
                 opt(typical_gain(&rows), |g| format!("{g:.0} m")),
                 opt(early, two),
@@ -829,17 +838,16 @@ fn sessions_table(sessions: &[&Session], cutoff: Date, args: &Args) -> String {
         ("Climb m", "num"),
         ("TRIMP", "num"),
     ];
-    let mut routes: BTreeMap<usize, usize> = BTreeMap::new();
-    for route in sessions.iter().filter_map(|s| s.route) {
-        *routes.entry(route).or_default() += 1;
+    let mut routes: BTreeMap<usize, (&str, usize)> = BTreeMap::new();
+    for s in sessions {
+        if let Some(route) = s.route {
+            routes.entry(route).or_insert((&s.route_name, 0)).1 += 1;
+        }
     }
     let options: String = routes
         .iter()
-        .map(|(route, count)| {
-            format!(
-                "<option value=\"{route}\">{} ({count})</option>",
-                esc(&route_label(Some(*route)))
-            )
+        .map(|(route, (name, count))| {
+            format!("<option value=\"{route}\">{} ({count})</option>", esc(name))
         })
         .collect();
     let mut out = format!(
@@ -893,8 +901,8 @@ fn session_rows(s: &Session, cutoff: Date, args: &Args, columns: usize) -> Strin
         name = esc(&s.activity.name),
     );
     row.push_str(&match s.route {
-        Some(r) => format!("<td data-v=\"{r}\">{}</td>", esc(&route_label(s.route))),
-        None => format!("<td>{}</td>", esc(&route_label(None))),
+        Some(r) => format!("<td data-v=\"{r}\">{}</td>", esc(&s.route_name)),
+        None => format!("<td>{}</td>", esc(&s.route_name)),
     });
     row.push_str(&number(Some(s.run_s), &duration));
     row.push_str(&number(Some(s.walk_s), &duration));

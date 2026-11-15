@@ -256,12 +256,13 @@ fn write_file(path: &Path, contents: &str) -> Result<(), String> {
     std::fs::write(path, contents).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-pub const SESSION_FIELDS: [&str; 21] = [
+pub const SESSION_FIELDS: [&str; 22] = [
     "date",
     "activity_id",
     "name",
     "type",
     "route",
+    "route_name",
     "run_s",
     "walk_s",
     "run_m",
@@ -320,6 +321,7 @@ pub fn write_metrics(report_dir: &Path, metrics: &Metrics, args: &Args) -> Resul
             s.activity.name.clone(),
             s.activity.r#type.clone(),
             s.route.map(|r| format!("R{}", r + 1)).unwrap_or_default(),
+            s.route.map_or(String::new(), |_| s.route_name.clone()),
             py_num(round(s.run_s, 1)),
             py_num(round(s.walk_s, 1)),
             py_num(round(s.run_m, 1)),

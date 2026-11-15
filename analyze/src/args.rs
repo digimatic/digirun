@@ -19,6 +19,8 @@ pub const DEFAULT_PACE_THRESHOLD: i64 = 540; // s/km; faster than this is a run
 pub const AMBIGUOUS_CADENCE: (i64, i64) = (61, 71); // hybrid resolves this band with the pace threshold
 pub const DEFAULT_TYPES: &str = "running,trail";
 pub const DEFAULT_MIN_PASS_S: i64 = 20; // shorter passes are absorbed into a neighbour
+pub const DEFAULT_PORT: u16 = 8765; // --serve listens here, on 127.0.0.1 only
+pub const DEFAULT_NAMING_DAYS: i64 = 30; // --name-routes asks about this many days
 pub const DEFAULT_SMOOTH_S: i64 = 10; // rolling-median width for cadence in the detail table
 
 pub const METHODS: [&str; 4] = ["hybrid", "cadence", "pace", "lap"];
@@ -163,6 +165,13 @@ pub struct Args {
     pub html: Option<PathBuf>,
     /// Add satellite maps to the HTML report, which then holds GPS positions.
     pub map: bool,
+    /// Route names file; None means routes.txt in --out, if it exists.
+    pub route_names: Option<PathBuf>,
+    /// Ask for the names of the routes run in the range and write them.
+    pub name_routes: bool,
+    /// Serve the report on localhost, with route cards that can be renamed.
+    pub serve: bool,
+    pub port: u16,
 }
 
 /// Worker threads used to parse the files.
@@ -212,6 +221,10 @@ impl Default for Args {
             hr_max: None,
             html: None,
             map: false,
+            route_names: None,
+            name_routes: false,
+            serve: false,
+            port: DEFAULT_PORT,
         }
     }
 }
@@ -346,6 +359,11 @@ fn groups() -> Vec<Group> {
                     &["--out"],
                     "OUT",
                     format!("directory of downloaded files (default: {DEFAULT_OUT})"),
+                ),
+                Action::new(
+                    &["--route-names"],
+                    "PATH",
+                    "route names, one '<activity id> = <name>' per line; any session of a route names it (default: routes.txt in --out)".to_string(),
                 ),
                 Action::new(
                     &["--start"],
@@ -495,6 +513,21 @@ fn groups() -> Vec<Group> {
                     "report tables to print: 'all' or comma-separated activities,weekly,overall,detail,summary,progress,zones,fitness,efforts (default: activities,weekly,overall); detail lists every run/walk pass, split on cadence, with its stats".to_string(),
                 ),
                 Action::new(&["--no-csv"], "", "print the report only".to_string()),
+                Action::new(
+                    &["--serve"],
+                    "",
+                    "serve the HTML report on 127.0.0.1 instead of reporting, with route cards you can rename; names are saved to the --route-names file".to_string(),
+                ),
+                Action::new(
+                    &["--port"],
+                    "N",
+                    format!("port for --serve (default: {DEFAULT_PORT})"),
+                ),
+                Action::new(
+                    &["--name-routes"],
+                    "",
+                    format!("ask for a name for each route run in the range (default: the last {DEFAULT_NAMING_DAYS} days) and write them to the --route-names file instead of reporting"),
+                ),
                 Action::new(
                     &["--html"],
                     "PATH",
@@ -665,6 +698,7 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                 });
             }
             "--out" => args.out = PathBuf::from(value(&mut i)?),
+            "--route-names" => args.route_names = Some(PathBuf::from(value(&mut i)?)),
             "--start" => args.start = Some(parse_date(&value(&mut i)?, "start date")?),
             "--end" => args.end = Some(parse_date(&value(&mut i)?, "end date")?),
             "--type" => {
@@ -769,6 +803,14 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
             "--report-dir" => args.report_dir = PathBuf::from(value(&mut i)?),
             "--cadence-stats" => args.cadence_stats = true,
             "--no-csv" => args.no_csv = true,
+            "--name-routes" => args.name_routes = true,
+            "--serve" => args.serve = true,
+            "--port" => {
+                let raw = value(&mut i)?;
+                args.port = raw.parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| {
+                    CliError::argument(format!("argument --port: invalid port: {}", quoted(&raw)))
+                })?;
+            }
             "--html" => args.html = Some(PathBuf::from(value(&mut i)?)),
             "--map" => args.map = true,
             "--show" => {
@@ -863,8 +905,10 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
     }
 
     args.jobs = args.jobs.max(1);
-    if args.map && args.html.is_none() {
-        return Err(CliError::argument("argument --map: needs --html"));
+    if args.map && args.html.is_none() && !args.serve {
+        return Err(CliError::argument(
+            "argument --map: needs --html or --serve",
+        ));
     }
     if let Some(days) = args.days {
         if args.start.is_some() {
@@ -873,6 +917,13 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
             ));
         }
         args.start = Some(args.end.unwrap_or(today).minus_days(days - 1));
+    }
+    if args.name_routes && args.start.is_none() {
+        args.start = Some(
+            args.end
+                .unwrap_or(today)
+                .minus_days(DEFAULT_NAMING_DAYS - 1),
+        );
     }
     Ok(args)
 }

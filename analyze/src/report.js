@@ -116,3 +116,92 @@ function openLinkedSession() {
 }
 window.addEventListener("hashchange", openLinkedSession);
 openLinkedSession();
+
+// Under --serve the route cards can be renamed; the server saves routes.txt and
+// the page reloads on the same range, so the new name shows everywhere.
+const RANGE_KEY = "digirun-range";
+function rememberedRange() {
+  try {
+    const range = sessionStorage.getItem(RANGE_KEY);
+    sessionStorage.removeItem(RANGE_KEY);
+    return range;
+  } catch {
+    return null;
+  }
+}
+if (body.dataset.editable !== undefined) {
+  const range = rememberedRange();
+  if (range) {
+    setRange(range);
+  }
+  document.querySelectorAll(".route-card").forEach((card) => {
+    const label = card.querySelector(".label");
+    const row = document.createElement("div");
+    row.className = "naming";
+    label.replaceWith(row);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "rename";
+    button.textContent = "\u270e";
+    button.title = "Rename this route";
+    button.setAttribute("aria-label", `Rename ${label.textContent}`);
+    row.append(label, button);
+    const error = document.createElement("div");
+    error.className = "rename-error";
+    error.hidden = true;
+    row.after(error);
+
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const input = document.createElement("input");
+      input.className = "rename-input";
+      input.value = label.textContent;
+      input.placeholder = "Empty: the automatic name";
+      input.setAttribute("aria-label", "Route name");
+      row.replaceChildren(input);
+      input.focus();
+      input.select();
+      const restore = () => row.replaceChildren(label, button);
+      // The card is a link: typing and clicking in the field must not follow it.
+      input.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      input.addEventListener("blur", restore);
+      input.addEventListener("keydown", async (e) => {
+        if (e.key === "Escape") {
+          restore();
+          return;
+        }
+        if (e.key !== "Enter") {
+          return;
+        }
+        e.preventDefault();
+        input.disabled = true;
+        const form = new URLSearchParams({ route: card.dataset.route, name: input.value });
+        try {
+          const reply = await fetch("/route-name", {
+            method: "POST",
+            headers: { "X-Digirun": "rename" },
+            body: form,
+          });
+          if (!reply.ok) {
+            throw new Error((await reply.text()) || `HTTP ${reply.status}`);
+          }
+          try {
+            sessionStorage.setItem(RANGE_KEY, body.dataset.range);
+          } catch {
+            // The page then comes back on its default range.
+          }
+          window.location.hash = "routes";
+          window.location.reload();
+        } catch (failure) {
+          input.disabled = false;
+          error.textContent = failure.message;
+          error.hidden = false;
+        }
+      });
+    });
+  });
+}

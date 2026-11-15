@@ -64,11 +64,15 @@ ignored as GPS noise.
 | `--cadence-stats` | also report cadence mean + stdev (strides/min) |
 | `--min-pass` / `--smooth` | detail table: shortest pass, and cadence smoothing (default 20 s / 10 s) |
 | `--html PATH` | also write the metrics as one self-contained HTML page with charts, whatever `--show` picks |
-| `--map` | add a satellite map to the HTML report, with a button on the page to turn it on and off (`analyze.sh` does this unless given `--no-map` or `DIGIRUN_MAP=0`) |
+| `--map` | add a satellite map to the HTML report (with `--html` or `--serve`), with a button on the page to turn it on and off (`analyze.sh` does this unless given `--no-map` or `DIGIRUN_MAP=0`) |
 | `--show` | tables to print: `activities,weekly,overall` (default), `detail`, `summary`, `progress`, `zones`, `fitness`, `efforts`, or `all` |
+| `--route-names` | route names file, one `<activity id> = <name>` per line (default: `routes.txt` in `--out`, if it exists); see [Naming routes](#naming-routes) |
 | `--hr-max` | maximum heart rate in bpm, needed for HR zones, TRIMP and pace in zone 3; never guessed |
 | `--report-dir` | where the CSVs are written (default `./runs/analysis`) |
 | `--no-csv` | print the report only |
+| `--serve` | serve the HTML report on 127.0.0.1 instead of reporting, with route cards you can rename; see [Renaming in the report](#renaming-in-the-report) |
+| `--port` | port for `--serve` (default: 8765) |
+| `--name-routes` | ask for a name for each route run in the range (default: the last 30 days) and write them to the `--route-names` file, instead of reporting; see [Naming routes](#naming-routes) |
 
 `--cadence-stats` adds `cad`/`sd` columns to the console tables and
 `mean_cadence`/`stdev_cadence` to `analysis.csv`. Cadence stdev is over segments,
@@ -226,6 +230,15 @@ How they are defined:
   walk that follows, as the session median.
 - **Routes:** tracks are reduced to ~100 m grid cells. Each joins the most similar
   earlier route at a Jaccard overlap of 0.6 or more with that route's first track.
+  Two tracks of the same length must share about 75% of their cells, and a shortcut
+  or extension of a route must cover at least 60% of the longer track. Direction does
+  not count, so a loop run backwards is the same route.
+- **Route names:** each route is described by its first track, like
+  `R3 · 5.2 km loop NE`: its distance, its shape (`one-way` when start and end are
+  over 500 m apart, `out-and-back` when the way back retraces the way out, else
+  `loop`) and the direction of its farthest point from the start. The numbers follow
+  the order the routes were first run, so they can change with `--type` or with
+  older files added. Your own names stay put: see below.
 - **Grade-adjusted pace:** Minetti's energy cost per `--window` window, with the grade
   clamped to ±30%.
 - **Best efforts:** the fastest contiguous stretch, not crossing a pause longer than
@@ -233,6 +246,54 @@ How they are defined:
 - **Predictions:** Riegel (exponent 1.06) and Daniels' VDOT, from the longest effort
   of at least 3 km, at least 90% running, in the last 90 days up to `--end` or today.
   They come from training efforts, so a race would likely be faster.
+
+### Naming routes
+
+Put your own names in `routes.txt` in the downloads folder (`--out`), or in the file
+given by `--route-names`:
+
+```
+# <activity id> = <name>
+16855914674 = Home loop
+16982265491 = Lake out-and-back
+```
+
+Any session of a route names the whole route, so the ids hold even when the route
+numbers change. Hover a route card in the HTML report for an id, or take one from
+the file names or `sessions.csv`. `#` starts a comment, so names can't contain one.
+An id that names an already named route differently is ignored with a warning.
+
+`--name-routes` (or `./analyze.sh --name-routes`) asks for the names instead, for each
+route run in the last 30 days, or the range from `--days`, `--start` and `--end`.
+It lists the most recently run route first:
+
+```
+Routes run since 2026-10-17 (Enter keeps, - goes back to the automatic name):
+
+R16 · 5.0 km loop NW   5 sessions, last 2026-11-15
+  name [R16 · 5.0 km loop NW]: Ridge loop
+R4 · 4.7 km out-and-back E   24 sessions, last 2026-11-10
+  name [Lake]:
+
+Wrote runs/routes.txt (1 name changed)
+```
+
+Enter keeps a name, `-` goes back to the automatic one, and Ctrl-D stops early with
+the answers so far. A new name is written under the route's newest session, and any
+other lines naming that route are removed; comments and other lines are kept.
+
+### Renaming in the report
+
+`--serve` (or `./analyze.sh --serve`) serves the report on
+`http://127.0.0.1:8765/` (`--port` for another) until Ctrl-C, without printing the
+tables. Each route card has a ✎ button: type a name and press Enter, or Escape to
+cancel; an empty name goes back to the automatic one. The server saves
+`routes.txt` the same way `--name-routes` does and the page reloads with the new
+name everywhere. With `--html` the file is rewritten too.
+
+It listens on 127.0.0.1 only and accepts a rename only from its own page: the
+request must carry an `X-Digirun` header, which another site cannot send, and a
+local `Host`.
 
 ## Behaviour notes
 

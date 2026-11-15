@@ -27,6 +27,10 @@ every metric table over all history: progress, HR zones, fitness and best effort
 Every run also writes `runs/analysis/report.html`, one page with charts and tables
 that also works offline, apart from its satellite map; `--open` opens it when the run
 ends. `--no-map`, or `DIGIRUN_MAP=0`, leaves the map and your GPS positions out.
+`--name-routes` asks for a name for each route run in the last 30 days instead,
+and saves them in `runs/routes.txt`.
+`--serve` serves the report on http://127.0.0.1:8765/ instead (with `--open`, it
+opens it), where the ✎ on a route card renames the route and saves `routes.txt`.
 `DIGIRUN_OUT` and `DIGIRUN_INTERVAL` override the data directory and
 the interval, and `DIGIRUN_HR_MAX` adds HR load to the weekly summary. Settings can
 go in a `.env` file, which is gitignored (see [`.env.example`](.env.example)); a

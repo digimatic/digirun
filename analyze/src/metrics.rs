@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use crate::analyze::{RUN, WALK, in_range};
 use crate::args::Args;
 use crate::dt::Date;
-use crate::model::Activity;
+use crate::model::{Activity, Point, haversine};
 use crate::passes::{Pass, Step, build_passes, median, offsets, smoothed_altitude, steps, totals};
 
 pub const ZONES: usize = 5;
@@ -26,6 +26,13 @@ const RECOVERY_WINDOW_S: f64 = 60.0;
 const ZONE_PACE_MIN_S: f64 = 120.0;
 const ROUTE_CELL_M: f64 = 100.0;
 const ROUTE_MIN_OVERLAP: f64 = 0.6;
+/// A route whose start and end are further apart than this is one-way.
+const ROUTE_ONE_WAY_M: f64 = 500.0;
+/// The two halves of an out-and-back share at least this much of their cells.
+const ROUTE_RETRACED_OVERLAP: f64 = 0.5;
+/// The route name of a session without GPS positions.
+pub const NO_ROUTE: &str = "no GPS";
+const COMPASS: [&str; 8] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 const GRADE_LIMIT: f64 = 0.30;
 const PREDICTION_MIN_DISTANCE_M: f64 = 3000.0;
 const PREDICTION_MAX_AGE_DAYS: i64 = 90;
@@ -53,6 +60,8 @@ pub struct Session<'a> {
     pub activity: &'a Activity,
     /// Index of the route group, or None without GPS positions.
     pub route: Option<usize>,
+    /// The route's name from routes.txt, or a description of its first track.
+    pub route_name: String,
     pub run_s: f64,
     pub walk_s: f64,
     pub run_m: f64,
@@ -187,11 +196,17 @@ pub fn vdot(distance_m: f64, time_s: f64) -> f64 {
 
 /// The ~100 m grid cells a track passes through.
 pub fn route_cells(activity: &Activity) -> BTreeSet<(i64, i64)> {
+    cells_of(located(&activity.points))
+}
+
+/// The points with a GPS position.
+fn located(points: &[Point]) -> impl Iterator<Item = &Point> {
+    points.iter().filter(|p| p.lat != 0.0 || p.lon != 0.0)
+}
+
+fn cells_of<'p>(points: impl Iterator<Item = &'p Point>) -> BTreeSet<(i64, i64)> {
     const METRES_PER_DEGREE: f64 = 111_320.0;
-    activity
-        .points
-        .iter()
-        .filter(|p| p.lat != 0.0 || p.lon != 0.0)
+    points
         .map(|p| {
             // The whole degree of latitude keeps the grid the same for every track.
             let scale = p.lat.round().to_radians().cos();
@@ -201,6 +216,48 @@ pub fn route_cells(activity: &Activity) -> BTreeSet<(i64, i64)> {
             )
         })
         .collect()
+}
+
+/// The compass point from one position towards another.
+fn compass(from: &Point, to: &Point) -> &'static str {
+    let (p1, p2) = (from.lat.to_radians(), to.lat.to_radians());
+    let dl = (to.lon - from.lon).to_radians();
+    let y = dl.sin() * p2.cos();
+    let x = p1.cos() * p2.sin() - p1.sin() * p2.cos() * dl.cos();
+    let degrees = y.atan2(x).to_degrees().rem_euclid(360.0);
+    COMPASS[((degrees + 22.5) / 45.0) as usize % COMPASS.len()]
+}
+
+/// A name for a route from one of its tracks, like `R3 · 5.2 km loop NE`: the
+/// distance, the shape, and the direction of the point farthest from the start.
+pub fn describe_route(index: usize, activity: &Activity) -> String {
+    let label = format!("R{}", index + 1);
+    let points: Vec<&Point> = located(&activity.points).collect();
+    let (Some(&start), Some(&end)) = (points.first(), points.last()) else {
+        return label;
+    };
+    let from_start = |p: &Point| haversine(start.lat, start.lon, p.lat, p.lon);
+    let Some((far, &farthest)) = points
+        .iter()
+        .enumerate()
+        .max_by(|a, b| from_start(a.1).total_cmp(&from_start(b.1)))
+    else {
+        return label;
+    };
+    if from_start(farthest) == 0.0 {
+        return label;
+    }
+    let out = cells_of(points[..=far].iter().copied());
+    let back = cells_of(points[far..].iter().copied());
+    let shape = if from_start(end) > ROUTE_ONE_WAY_M {
+        "one-way"
+    } else if jaccard(&out, &back) >= ROUTE_RETRACED_OVERLAP {
+        "out-and-back"
+    } else {
+        "loop"
+    };
+    let km = (end.distance_m - start.distance_m) / 1000.0;
+    format!("{label} · {km:.1} km {shape} {}", compass(start, farthest))
 }
 
 fn jaccard(a: &BTreeSet<(i64, i64)>, b: &BTreeSet<(i64, i64)>) -> f64 {
@@ -233,6 +290,72 @@ pub fn assign_routes(tracks: &[BTreeSet<(i64, i64)>]) -> Vec<Option<usize>> {
             })
         })
         .collect()
+}
+
+/// Parse routes.txt: `<activity id> = <name>` per line, `#` comments.
+pub fn parse_route_names(text: &str) -> Result<Vec<(String, String)>, String> {
+    let mut names = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line.split('#').next().unwrap_or_default().trim();
+        if line.is_empty() {
+            continue;
+        }
+        match line.split_once('=') {
+            Some((id, name)) if !id.trim().is_empty() && !name.trim().is_empty() => {
+                names.push((id.trim().to_string(), name.trim().to_string()));
+            }
+            _ => {
+                return Err(format!("line {}: expected `<activity id> = <name>`", n + 1));
+            }
+        }
+    }
+    Ok(names)
+}
+
+/// What naming the routes left unresolved.
+#[derive(Debug, Default, PartialEq)]
+pub struct Naming {
+    /// Activity ids that are not among the sessions.
+    pub unmatched: Vec<String>,
+    /// Later lines that named an already named route differently.
+    pub conflicts: Vec<String>,
+}
+
+/// Rename each route that has one of its sessions in `names`; the first line wins.
+pub fn name_routes(metrics: &mut Metrics, names: &[(String, String)]) -> Naming {
+    let mut naming = Naming::default();
+    let mut chosen: std::collections::BTreeMap<usize, &str> = Default::default();
+    for (id, name) in names {
+        let Some(session) = metrics
+            .sessions
+            .iter()
+            .find(|s| s.activity.activity_id == *id)
+        else {
+            naming.unmatched.push(id.clone());
+            continue;
+        };
+        let Some(route) = session.route else {
+            naming
+                .conflicts
+                .push(format!("{id} has no GPS track to name"));
+            continue;
+        };
+        match chosen.get(&route) {
+            Some(first) if first != name => naming
+                .conflicts
+                .push(format!("{id} = {name}: its route is already named {first}")),
+            Some(_) => {}
+            None => {
+                chosen.insert(route, name);
+            }
+        }
+    }
+    for session in &mut metrics.sessions {
+        if let Some(name) = session.route.and_then(|r| chosen.get(&r)) {
+            session.route_name = name.to_string();
+        }
+    }
+    naming
 }
 
 /// The class of each step (None outside any pass), and whether its pass counts.
@@ -409,7 +532,12 @@ fn best_effort(
     best
 }
 
-fn session<'a>(activity: &'a Activity, route: Option<usize>, args: &Args) -> Session<'a> {
+fn session<'a>(
+    activity: &'a Activity,
+    route: Option<usize>,
+    route_name: String,
+    args: &Args,
+) -> Session<'a> {
     let passes = build_passes(activity, args);
     let points = &activity.points;
     let steps = steps(points, args);
@@ -466,6 +594,7 @@ fn session<'a>(activity: &'a Activity, route: Option<usize>, args: &Args) -> Ses
     Session {
         activity,
         route,
+        route_name,
         run_s,
         walk_s,
         run_m,
@@ -636,10 +765,20 @@ pub fn build<'a>(activities: &[&'a Activity], args: &Args) -> Metrics<'a> {
 
     let cells: Vec<BTreeSet<(i64, i64)>> = ordered.iter().map(|a| route_cells(a)).collect();
     let routes = assign_routes(&cells);
+    // Each route is described by its first track, which the others were matched to.
+    let mut names: Vec<String> = Vec::new();
+    for (activity, route) in ordered.iter().zip(&routes) {
+        if *route == Some(names.len()) {
+            names.push(describe_route(names.len(), activity));
+        }
+    }
     let sessions: Vec<Session> = ordered
         .iter()
         .zip(routes)
-        .map(|(activity, route)| session(activity, route, args))
+        .map(|(activity, route)| {
+            let name = route.map_or(NO_ROUTE.to_string(), |r| names[r].clone());
+            session(activity, route, name, args)
+        })
         .collect();
     let weeks = weeks(&sessions);
     Metrics { sessions, weeks }

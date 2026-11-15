@@ -18,12 +18,14 @@ pub mod load;
 pub mod map;
 pub mod metrics;
 pub mod model;
+pub mod naming;
 pub mod parse;
 pub mod passes;
 pub mod report;
+pub mod serve;
 pub mod xml;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::args::{Args, Method};
@@ -88,6 +90,21 @@ pub fn run(args: &Args) -> i32 {
         })
         .collect();
 
+    if args.name_routes || args.serve {
+        let mut metrics = metrics::build(&kept, args);
+        let loaded: BTreeSet<&str> = activities.iter().map(|a| a.activity_id.as_str()).collect();
+        if let Err(error) = name_routes(&mut metrics, args, &out_dir, &loaded) {
+            eprintln!("error: {error}");
+            return 1;
+        }
+        let path = route_names_path(args, &out_dir);
+        if args.name_routes {
+            return naming::run(&metrics, args, &path);
+        }
+        let reference = args.end.unwrap_or_else(dt::Date::today);
+        return serve::run(&mut serve::State::new(&mut metrics, args, path, reference));
+    }
+
     let mut segments: Vec<Segment> = Vec::new();
     let (mut dropped_slow, mut dropped_fast) = (0, 0);
     let mut kept_segments: Vec<&Segment> = Vec::new();
@@ -116,7 +133,15 @@ pub fn run(args: &Args) -> i32 {
     };
 
     let reference = args.end.unwrap_or_else(dt::Date::today);
-    let metrics = (args.show.metrics() || args.html.is_some()).then(|| metrics::build(&kept, args));
+    let mut metrics =
+        (args.show.metrics() || args.html.is_some()).then(|| metrics::build(&kept, args));
+    if let Some(metrics) = &mut metrics {
+        let loaded: BTreeSet<&str> = activities.iter().map(|a| a.activity_id.as_str()).collect();
+        if let Err(error) = name_routes(metrics, args, &out_dir, &loaded) {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    }
 
     let mut notes: Vec<String> = Vec::new();
     let range = match (args.start, args.end) {
@@ -236,6 +261,50 @@ pub fn run(args: &Args) -> i32 {
         println!("Wrote {}", path.display());
     }
     0
+}
+
+/// routes.txt in --out, unless --route-names names another file.
+fn route_names_path(args: &Args, out_dir: &Path) -> PathBuf {
+    match &args.route_names {
+        Some(path) => expanduser(path),
+        None => out_dir.join("routes.txt"),
+    }
+}
+
+/// Apply routes.txt to the routes, warning about lines that name nothing.
+fn name_routes(
+    metrics: &mut metrics::Metrics,
+    args: &Args,
+    out_dir: &Path,
+    loaded: &BTreeSet<&str>,
+) -> Result<(), String> {
+    let path = route_names_path(args, out_dir);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        // --name-routes and --serve create the file, so it need not exist yet.
+        Err(e)
+            if e.kind() == std::io::ErrorKind::NotFound
+                && (args.route_names.is_none() || args.name_routes || args.serve) =>
+        {
+            return Ok(());
+        }
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let names =
+        metrics::parse_route_names(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    let naming = metrics::name_routes(metrics, &names);
+    // An activity left out by --type, --activity or --end is not a mistake.
+    for id in naming
+        .unmatched
+        .iter()
+        .filter(|id| !loaded.contains(id.as_str()))
+    {
+        eprintln!("warning: {}: no activity {id}", path.display());
+    }
+    for conflict in &naming.conflicts {
+        eprintln!("warning: {}: {conflict}", path.display());
+    }
+    Ok(())
 }
 
 fn collect_segments(activities: &[&Activity], args: &Args) -> Vec<Segment> {

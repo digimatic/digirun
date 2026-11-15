@@ -611,10 +611,6 @@ fn print_zones(metrics: &Metrics, args: &Args, reference: Date) {
     println!("{}", load_line("Volume", km_load(metrics, reference), "km"));
 }
 
-pub(crate) fn route_label(route: Option<usize>) -> String {
-    route.map_or("no GPS".to_string(), |r| format!("R{}", r + 1))
-}
-
 pub(crate) fn mean_of(values: &[f64]) -> Option<f64> {
     (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
 }
@@ -647,7 +643,7 @@ fn print_fitness(metrics: &Metrics, args: &Args) {
         println!();
         println!(
             "{} ({} sessions, typical gain {})",
-            route_label(route),
+            rows[0].route_name,
             rows.len(),
             gain.map_or("-".to_string(), |g| format!("{} m", round_int(g)))
         );

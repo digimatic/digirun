@@ -11,7 +11,7 @@ use crate::html::esc;
 use crate::metrics::Session;
 use crate::model::{Activity, Point};
 use crate::passes::Pass;
-use crate::report::{route_label, typical_gain};
+use crate::report::typical_gain;
 
 const METRES_PER_DEGREE: f64 = 111_320.0;
 /// A point closer than this to the last one drawn adds nothing but bytes.
@@ -248,6 +248,10 @@ impl<'a> Route<'_, 'a> {
         self.sessions[self.sessions.len() - 1].activity
     }
 
+    fn name(&self) -> &str {
+        &self.sessions[0].route_name
+    }
+
     fn colour(&self, colours: &[(usize, &'static str)]) -> &'static str {
         colours
             .iter()
@@ -346,11 +350,7 @@ fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: b
         ));
         hits.push_str(&format!(
             "<path class=\"track-hit\" d=\"{d}\" data-tip=\"{}\"/>\n",
-            esc(&format!(
-                "{}\n{}",
-                route_label(Some(route.index)),
-                route.summary()
-            ))
+            esc(&format!("{}\n{}", route.name(), route.summary()))
         ));
     }
     body.push_str(&hits);
@@ -363,7 +363,7 @@ fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: b
             format!(
                 "<span class=\"entry\"><span class=\"stroke {}\"></span>{}</span>",
                 r.colour(colours),
-                esc(&route_label(Some(r.index)))
+                esc(r.name())
             )
         })
         .collect();
@@ -390,11 +390,7 @@ fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: b
             .map(|route| {
                 format!(
                     "{{\"tip\":{},\"mark\":\"{}\",\"near\":{},\"track\":{}}}",
-                    json_string(&format!(
-                        "{}\n{}",
-                        route_label(Some(route.index)),
-                        route.summary()
-                    )),
+                    json_string(&format!("{}\n{}", route.name(), route.summary())),
                     route.colour(colours),
                     near(&route),
                     positions_json(&route.newest().points, cos_lat)
@@ -423,7 +419,7 @@ fn route_card(route: &Route, colours: &[(usize, &'static str)]) -> Option<String
     let located = located_metres(activity, cos_lat);
     let frame = Frame::fit(&located, CARD_SIZE, PAD)?;
     let (x, y) = frame.px(located[0]);
-    let name = route_label(Some(route.index));
+    let name = route.name();
     let body = format!(
         "<path class=\"track {}\" d=\"{}\"/>\n<circle class=\"start\" cx=\"{x:.1}\" cy=\"{y:.1}\" r=\"4\"/>\n{}",
         route.colour(colours),
@@ -431,12 +427,14 @@ fn route_card(route: &Route, colours: &[(usize, &'static str)]) -> Option<String
         scale_bar(&frame, CARD_SIZE)
     );
     Some(format!(
-        "<a class=\"card route-card\" href=\"#sessions\" data-route=\"{}\">{}\
+        "<a class=\"card route-card\" href=\"#sessions\" data-route=\"{}\" \
+         title=\"Name it in routes.txt: {} = ...\">{}\
          <div class=\"label\">{}</div><div class=\"detail\">{}</div>\
          <div class=\"detail\">Last run {}</div></a>\n",
         route.index,
+        esc(&activity.activity_id),
         svg(CARD_SIZE, &format!("Route {name}"), &body),
-        esc(&name),
+        esc(name),
         esc(&route.summary()),
         activity.date
     ))
