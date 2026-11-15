@@ -14,6 +14,8 @@ use crate::xml;
 
 /// One activity group: the GPX and TCX files that share an activity id.
 pub type Files = BTreeMap<String, PathBuf>;
+/// One file group's outcome, None until a worker has read it.
+type Slot = Option<Result<Option<Activity>, String>>;
 
 pub struct Loaded {
     pub activities: Vec<Activity>,
@@ -182,17 +184,13 @@ pub fn groups(out_dir: &Path) -> Vec<(String, Files)> {
             .insert(format!(".{suffix}"), path);
     }
 
-    groups
-        .into_iter()
-        .map(|(aid, files)| (aid, files))
-        .collect()
+    groups.into_iter().collect()
 }
 
 pub fn load_activities(out_dir: &Path, jobs: usize) -> Loaded {
     let work: Arc<Vec<(String, Files)>> = Arc::new(groups(out_dir));
 
-    let results: Arc<Mutex<Vec<Option<Result<Option<Activity>, String>>>>> =
-        Arc::new(Mutex::new(vec![None; work.len()]));
+    let results: Arc<Mutex<Vec<Slot>>> = Arc::new(Mutex::new(vec![None; work.len()]));
     let next = Arc::new(AtomicUsize::new(0));
 
     if jobs > 1 && work.len() >= MIN_PARALLEL_FILES {

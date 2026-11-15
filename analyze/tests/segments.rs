@@ -69,13 +69,17 @@ fn hybrid_resolves_the_ambiguous_cadence_band_with_pace() {
 
 #[test]
 fn pace_and_cadence_methods() {
-    let mut pace_only = Args::default();
-    pace_only.method = Method::Pace;
+    let pace_only = Args {
+        method: Method::Pace,
+        ..Args::default()
+    };
     assert_eq!(classify(539.0, Some(50.0), &pace_only), "run");
     assert_eq!(classify(541.0, Some(90.0), &pace_only), "walk");
 
-    let mut cadence_only = Args::default();
-    cadence_only.method = Method::Cadence;
+    let cadence_only = Args {
+        method: Method::Cadence,
+        ..Args::default()
+    };
     assert_eq!(classify(700.0, Some(65.0), &cadence_only), "run");
     assert_eq!(classify(400.0, Some(64.0), &cadence_only), "walk");
     assert_eq!(classify(400.0, None, &cadence_only), "run"); // fallback to pace

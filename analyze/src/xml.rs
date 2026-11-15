@@ -103,7 +103,7 @@ fn node(start: &quick_xml::events::BytesStart) -> Node {
     }
 }
 
-fn attach(stack: &mut Vec<Node>, root: &mut Node, node: Node) {
+fn attach(stack: &mut [Node], root: &mut Node, node: Node) {
     match stack.last_mut() {
         Some(parent) => parent.children.push(node),
         None => *root = node,

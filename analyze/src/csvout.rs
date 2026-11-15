@@ -119,9 +119,9 @@ pub fn write_csvs(
             .collect::<Vec<_>>(),
     );
     let mut ordered: Vec<&Segment> = segments.to_vec();
-    ordered.sort_by(|a, b| (a.date, a.time.instant()).cmp(&(b.date, b.time.instant())));
+    ordered.sort_by_key(|a| (a.date, a.time.instant()));
     for s in ordered {
-        writer.row(&vec![
+        writer.row(&[
             s.activity_id.clone(),
             s.date.isoformat(),
             s.time.isoformat(),

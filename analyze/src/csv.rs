@@ -30,6 +30,12 @@ impl Writer {
     }
 }
 
+impl Default for Writer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Parse CSV text into records (used for `summary.csv`).
 pub fn read_records(content: &str) -> Vec<Vec<String>> {
     let mut records: Vec<Vec<String>> = Vec::new();

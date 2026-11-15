@@ -272,10 +272,10 @@ fn quoted(value: &str) -> String {
 pub fn parse_pace(value: &str, name: &str) -> Result<i64, CliError> {
     if value.contains(':') {
         let parts: Vec<&str> = value.split(':').collect();
-        if parts.len() >= 2 {
-            if let (Ok(minutes), Ok(seconds)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>()) {
-                return Ok(minutes * 60 + seconds);
-            }
+        if parts.len() >= 2
+            && let (Ok(minutes), Ok(seconds)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>())
+        {
+            return Ok(minutes * 60 + seconds);
         }
     } else if let Ok(seconds) = value.parse::<f64>() {
         return Ok(seconds as i64);

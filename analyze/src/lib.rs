@@ -350,13 +350,13 @@ fn apply_route_names(
 fn collect_segments(activities: &[&Activity], args: &Args) -> Vec<Segment> {
     let mut segments: Vec<Segment> = Vec::new();
     for activity in activities {
-        if !analyze::in_range(*activity, args) {
+        if !analyze::in_range(activity, args) {
             continue;
         }
         if args.method == Method::Lap {
-            segments.extend(analyze::lap_segments(*activity, args));
+            segments.extend(analyze::lap_segments(activity, args));
         } else {
-            segments.extend(analyze::build_segments(*activity, args));
+            segments.extend(analyze::build_segments(activity, args));
         }
     }
     segments
@@ -365,11 +365,11 @@ fn collect_segments(activities: &[&Activity], args: &Args) -> Vec<Segment> {
 fn expanduser(path: &Path) -> PathBuf {
     let mut components = path.components().peekable();
     let mut out = PathBuf::new();
-    if components.peek() == Some(&std::path::Component::Normal(std::ffi::OsStr::new("~"))) {
-        if let Ok(home) = std::env::var("HOME") {
-            out.push(home);
-            components.next();
-        }
+    if components.peek() == Some(&std::path::Component::Normal(std::ffi::OsStr::new("~")))
+        && let Ok(home) = std::env::var("HOME")
+    {
+        out.push(home);
+        components.next();
     }
     // pathlib drops the "." components, so "./runs" displays as "runs".
     for part in components {

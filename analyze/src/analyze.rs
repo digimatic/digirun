@@ -232,17 +232,17 @@ pub fn filter_segments<'a>(
     let mut slow = 0usize;
     let mut fast = 0usize;
     for s in segments {
-        if let Some(max) = max_pace {
-            if s.pace_s_per_km > max as f64 {
-                slow += 1;
-                continue;
-            }
+        if let Some(max) = max_pace
+            && s.pace_s_per_km > max as f64
+        {
+            slow += 1;
+            continue;
         }
-        if let Some(min) = min_pace {
-            if s.pace_s_per_km < min as f64 {
-                fast += 1;
-                continue;
-            }
+        if let Some(min) = min_pace
+            && s.pace_s_per_km < min as f64
+        {
+            fast += 1;
+            continue;
         }
         kept.push(s);
     }
@@ -250,15 +250,15 @@ pub fn filter_segments<'a>(
 }
 
 pub fn in_range(activity: &Activity, args: &Args) -> bool {
-    if let Some(start) = args.start {
-        if activity.date < start {
-            return false;
-        }
+    if let Some(start) = args.start
+        && activity.date < start
+    {
+        return false;
     }
-    if let Some(end) = args.end {
-        if activity.date > end {
-            return false;
-        }
+    if let Some(end) = args.end
+        && activity.date > end
+    {
+        return false;
     }
     true
 }
