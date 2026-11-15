@@ -727,7 +727,8 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                 let raw = value(&mut i)?;
                 args.types = if raw == "all" { None } else { list(&raw) };
             }
-            "--jobs" => args.jobs = int::<i64>(flag, &value(&mut i)?)? as usize,
+            // Under 1 runs single-threaded; clamped before the cast so -3 does not wrap.
+            "--jobs" => args.jobs = int::<i64>(flag, &value(&mut i)?)?.max(1) as usize,
             "--method" => {
                 let raw = value(&mut i)?;
                 args.method = match raw.as_str() {
@@ -842,7 +843,6 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
         i += 1;
     }
 
-    args.jobs = args.jobs.max(1);
     if args.map && args.html.is_none() && !args.serve {
         return Err(CliError::argument(
             "argument --map: needs --html or --serve",

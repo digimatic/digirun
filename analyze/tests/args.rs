@@ -169,3 +169,11 @@ fn map_needs_html() {
     assert!(parse(&html).unwrap().map);
     assert!(!parse(&[]).unwrap().map);
 }
+
+#[test]
+fn jobs_under_one_runs_single_threaded() {
+    for value in ["0", "-3"] {
+        let args = parse(&["--jobs".to_string(), value.to_string()]).unwrap();
+        assert_eq!(args.jobs, 1, "--jobs {value}");
+    }
+}
