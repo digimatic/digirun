@@ -10,7 +10,7 @@ use crate::metrics::{Metrics, sessions_in_range};
 use crate::model::{Activity, Segment};
 use crate::num::round;
 use crate::passes::Pass;
-use crate::segments::stats;
+use crate::segments::{RUN, WALK, of_class, stats};
 
 pub const ANALYSIS_FIELDS: [&str; 13] = [
     "date",
@@ -74,8 +74,8 @@ pub fn write_csvs(
             continue;
         }
         let total_time: f64 = rows.iter().map(|s| s.duration_s).sum();
-        for class in ["run", "walk"] {
-            let group: Vec<&Segment> = rows.iter().filter(|s| s.class == class).copied().collect();
+        for class in [RUN, WALK] {
+            let group = of_class(rows, class);
             if group.is_empty() {
                 continue;
             }

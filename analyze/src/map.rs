@@ -208,9 +208,9 @@ pub(crate) fn session_map(activity: &Activity, passes: &[Pass], with_map: bool) 
             ));
         }
         for pass in passes {
-            let class = if pass.class == RUN { "run" } else { "walk" };
             body.push_str(&format!(
-                "<path class=\"track {class}\" d=\"{}\"/>\n",
+                "<path class=\"track {}\" d=\"{}\"/>\n",
+                pass.class,
                 path(&activity.points[pass.start..=pass.end], cos_lat, &frame)
             ));
         }

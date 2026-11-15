@@ -23,7 +23,6 @@ use crate::metrics::{
 };
 use crate::num::mean_of;
 use crate::passes::{Pass, build_passes};
-use crate::segments::{RUN, WALK};
 use chart::{BarChart, PACE, Point, Series, TWO_DECIMALS, WHOLE, bar_chart, line_chart};
 
 const CSS: &str = include_str!("../report.css");
@@ -923,11 +922,7 @@ fn passes_table(passes: &[Pass]) -> String {
     );
     for (i, pass) in passes.iter().enumerate() {
         let s = &pass.stats;
-        let class = match pass.class {
-            RUN => "run",
-            WALK => "walk",
-            other => other,
-        };
+        let class = pass.class;
         let label = if pass.excluded {
             format!("{class}, excluded")
         } else {

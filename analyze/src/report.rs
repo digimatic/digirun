@@ -13,8 +13,7 @@ use crate::metrics::{
 use crate::model::{Activity, Segment, Stats};
 use crate::num::{mean_of, round_int};
 use crate::passes::{Pass, Source, totals};
-use crate::segments::stats;
-use crate::segments::{RUN, WALK};
+use crate::segments::{RUN, WALK, of_class, stats};
 
 /// Right-aligned cell, or `-` when the value is missing.
 fn cell(value: Option<f64>) -> String {
@@ -133,20 +132,8 @@ fn print_activities(activities: &[&Activity], segments: &[&Segment], show_cad: b
         if rows.is_empty() {
             continue;
         }
-        let run = stats(
-            &rows
-                .iter()
-                .filter(|s| s.class == "run")
-                .copied()
-                .collect::<Vec<_>>(),
-        );
-        let walk = stats(
-            &rows
-                .iter()
-                .filter(|s| s.class == "walk")
-                .copied()
-                .collect::<Vec<_>>(),
-        );
+        let run = stats(&of_class(rows, RUN));
+        let walk = stats(&of_class(rows, WALK));
         let mut parts = vec![
             format!("{:<11}", activity.date.isoformat()),
             format!(
@@ -180,20 +167,8 @@ fn print_weekly(segments: &[&Segment], show_cad: bool) {
             .push(s);
     }
     for (week, rows) in &weeks {
-        let run = stats(
-            &rows
-                .iter()
-                .filter(|s| s.class == "run")
-                .copied()
-                .collect::<Vec<_>>(),
-        );
-        let walk = stats(
-            &rows
-                .iter()
-                .filter(|s| s.class == "walk")
-                .copied()
-                .collect::<Vec<_>>(),
-        );
+        let run = stats(&of_class(rows, RUN));
+        let walk = stats(&of_class(rows, WALK));
         let mut parts = vec![format!("{:<10}", week)];
         parts.extend(cells(&run, show_cad));
         parts.extend(cells(&walk, show_cad));
@@ -215,12 +190,8 @@ fn print_overall(segments: &[&Segment], show_cad: bool) {
     println!("{}", "-".repeat(header.chars().count()));
 
     let total_time: f64 = segments.iter().map(|s| s.duration_s).sum();
-    for class in ["run", "walk"] {
-        let rows: Vec<&Segment> = segments
-            .iter()
-            .copied()
-            .filter(|s| s.class == class)
-            .collect();
+    for class in [RUN, WALK] {
+        let rows = of_class(segments, class);
         if rows.is_empty() {
             continue;
         }
