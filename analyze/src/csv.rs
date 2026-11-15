@@ -10,6 +10,7 @@ pub fn field(value: &str) -> String {
     }
 }
 
+#[derive(Default)]
 pub struct Writer {
     out: String,
 }
@@ -19,20 +20,14 @@ impl Writer {
         Writer { out: String::new() }
     }
 
-    pub fn row(&mut self, values: &[String]) {
-        let cells = values.iter().map(|v| field(v)).collect::<Vec<_>>();
+    pub fn row(&mut self, values: &[impl AsRef<str>]) {
+        let cells = values.iter().map(|v| field(v.as_ref())).collect::<Vec<_>>();
         self.out.push_str(&cells.join(","));
         self.out.push_str("\r\n");
     }
 
     pub fn contents(&self) -> &str {
         &self.out
-    }
-}
-
-impl Default for Writer {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

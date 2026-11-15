@@ -42,6 +42,7 @@ pub const SEGMENT_FIELDS: [&str; 8] = [
     "window_s",
 ];
 
+/// Write `analysis.csv` and `segments.csv`.
 pub fn write_csvs(
     report_dir: &Path,
     activities: &[&Activity],
@@ -49,7 +50,22 @@ pub fn write_csvs(
     args: &Args,
 ) -> Result<(), String> {
     std::fs::create_dir_all(report_dir).map_err(|e| format!("{}: {e}", report_dir.display()))?;
+    let analysis_path = report_dir.join("analysis.csv");
+    write_file(&analysis_path, &analysis_csv(activities, segments, args))?;
+    let segment_path = report_dir.join("segments.csv");
+    write_file(&segment_path, &segments_csv(segments))?;
 
+    println!();
+    println!(
+        "Wrote {} and {}",
+        display(&analysis_path),
+        display(&segment_path)
+    );
+    Ok(())
+}
+
+/// One row per activity and class, with the stats of its segments.
+fn analysis_csv(activities: &[&Activity], segments: &[&Segment], args: &Args) -> String {
     let mut by_activity: BTreeMap<&str, Vec<&Segment>> = BTreeMap::new();
     for s in segments {
         by_activity
@@ -64,15 +80,11 @@ pub fn write_csvs(
     }
 
     let mut writer = Writer::new();
-    writer.row(&fields.iter().map(|f| f.to_string()).collect::<Vec<_>>());
+    writer.row(&fields);
     for activity in activities {
-        let rows = match by_activity.get(activity.activity_id.as_str()) {
-            Some(rows) => rows,
-            None => continue,
-        };
-        if rows.is_empty() {
+        let Some(rows) = by_activity.get(activity.activity_id.as_str()) else {
             continue;
-        }
+        };
         let total_time: f64 = rows.iter().map(|s| s.duration_s).sum();
         for class in [RUN, WALK] {
             let group = of_class(rows, class);
@@ -107,17 +119,13 @@ pub fn write_csvs(
             writer.row(&row);
         }
     }
+    writer.contents().to_string()
+}
 
-    let analysis_path = report_dir.join("analysis.csv");
-    write_file(&analysis_path, writer.contents())?;
-
+/// One row per segment, in time order.
+fn segments_csv(segments: &[&Segment]) -> String {
     let mut writer = Writer::new();
-    writer.row(
-        &SEGMENT_FIELDS
-            .iter()
-            .map(|f| f.to_string())
-            .collect::<Vec<_>>(),
-    );
+    writer.row(&SEGMENT_FIELDS);
     let mut ordered: Vec<&Segment> = segments.to_vec();
     ordered.sort_by_key(|a| (a.date, a.time.instant()));
     for s in ordered {
@@ -134,17 +142,7 @@ pub fn write_csvs(
             py_num(round(s.duration_s, 1)),
         ]);
     }
-
-    let segment_path = report_dir.join("segments.csv");
-    write_file(&segment_path, writer.contents())?;
-
-    println!();
-    println!(
-        "Wrote {} and {}",
-        display(&analysis_path),
-        display(&segment_path)
-    );
-    Ok(())
+    writer.contents().to_string()
 }
 
 pub const PASS_FIELDS: [&str; 30] = [
@@ -189,12 +187,7 @@ pub fn write_passes(
     let num = |value: Option<f64>| value.map(py_num).unwrap_or_default();
 
     let mut writer = Writer::new();
-    writer.row(
-        &PASS_FIELDS
-            .iter()
-            .map(|f| f.to_string())
-            .collect::<Vec<_>>(),
-    );
+    writer.row(&PASS_FIELDS);
     for (activity, passes) in activities {
         for (i, p) in passes.iter().enumerate() {
             let s = &p.stats;
@@ -311,10 +304,9 @@ pub fn write_metrics(report_dir: &Path, metrics: &Metrics, args: &Args) -> Resul
     let num = |value: Option<f64>, digits: usize| {
         value.map(|v| py_num(round(v, digits))).unwrap_or_default()
     };
-    let fields = |names: &[&str]| names.iter().map(|f| f.to_string()).collect::<Vec<_>>();
 
     let mut writer = Writer::new();
-    writer.row(&fields(&SESSION_FIELDS));
+    writer.row(&SESSION_FIELDS);
     for s in sessions_in_range(metrics, args) {
         writer.row(&[
             s.activity.date.isoformat(),
@@ -345,7 +337,7 @@ pub fn write_metrics(report_dir: &Path, metrics: &Metrics, args: &Args) -> Resul
     write_file(&sessions_path, writer.contents())?;
 
     let mut writer = Writer::new();
-    writer.row(&fields(&WEEK_FIELDS));
+    writer.row(&WEEK_FIELDS);
     for week in metrics.weeks.iter().filter(|w| w.in_range(args)) {
         let mut row = vec![
             week.label(),
