@@ -83,7 +83,7 @@ fn try_run(args: &Args) -> Result<i32, String> {
         );
         return Ok(0);
     }
-    let mut dropped = Dropped {
+    let dropped = Dropped {
         type_skipped,
         type_unknown,
         ..Dropped::default()
@@ -98,7 +98,6 @@ fn try_run(args: &Args) -> Result<i32, String> {
                 .is_none_or(|ids| ids.contains(&a.activity_id))
         })
         .collect();
-    let reference = args.end.unwrap_or_else(dt::Date::today);
 
     if args.name_routes || args.serve {
         let mut metrics = named_metrics(&kept, args, &out_dir, &loaded_ids)?;
@@ -106,6 +105,7 @@ fn try_run(args: &Args) -> Result<i32, String> {
         if args.name_routes {
             return Ok(naming::run(&metrics, args, &path));
         }
+        let reference = args.end.unwrap_or_else(dt::Date::today);
         return Ok(serve::run(&mut serve::State::new(
             &mut metrics,
             args,
@@ -114,8 +114,21 @@ fn try_run(args: &Args) -> Result<i32, String> {
         )));
     }
 
+    report(args, &out_dir, &kept, &loaded_ids, &loaded.skipped, dropped)
+}
+
+/// Print the tables that were asked for, then write the CSVs and the HTML page.
+fn report(
+    args: &Args,
+    out_dir: &Path,
+    kept: &[&Activity],
+    loaded_ids: &BTreeSet<&str>,
+    skipped: &[String],
+    mut dropped: Dropped,
+) -> Result<i32, String> {
+    let reference = args.end.unwrap_or_else(dt::Date::today);
     let segments: Vec<Segment> = if args.show.segments() {
-        collect_segments(&kept, args)
+        collect_segments(kept, args)
     } else {
         Vec::new()
     };
@@ -143,14 +156,14 @@ fn try_run(args: &Args) -> Result<i32, String> {
     };
 
     let metrics = if args.show.metrics() || args.html.is_some() {
-        Some(named_metrics(&kept, args, &out_dir, &loaded_ids)?)
+        Some(named_metrics(kept, args, out_dir, loaded_ids)?)
     } else {
         None
     };
 
     report::print_header(args, &notes(args, &dropped));
     if !kept_segments.is_empty() {
-        report::print_report(&kept, &kept_segments, args);
+        report::print_report(kept, &kept_segments, args);
     }
     if args.show.detail {
         if detail.is_empty() {
@@ -163,13 +176,13 @@ fn try_run(args: &Args) -> Result<i32, String> {
     if let Some(metrics) = &metrics {
         report::print_metrics(metrics, args, reference);
     }
-    if !loaded.skipped.is_empty() {
+    if !skipped.is_empty() {
         println!();
-        println!("Skipped (no trackpoints): {}", loaded.skipped.join(", "));
+        println!("Skipped (no trackpoints): {}", skipped.join(", "));
     }
 
     if !args.no_csv {
-        write_csvs(args, &kept, &kept_segments, &detail, metrics.as_ref())?;
+        write_csvs(args, kept, &kept_segments, &detail, metrics.as_ref())?;
     }
     if let (Some(path), Some(metrics)) = (&args.html, &metrics) {
         let path = expanduser(path);

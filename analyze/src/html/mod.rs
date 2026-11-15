@@ -61,49 +61,17 @@ pub fn write_report(
 /// The whole page.
 pub fn render(metrics: &Metrics, args: &Args, reference: Date) -> String {
     let sessions = sessions_in_range(metrics, args);
-    let weeks: Vec<&Week> = metrics.weeks.iter().filter(|w| w.in_range(args)).collect();
     let cutoff = reference.minus_days(RECENT_DAYS);
-    let recent = View {
-        key: "recent",
-        sessions: sessions
-            .iter()
-            .copied()
-            .filter(|s| s.activity.date >= cutoff)
-            .collect(),
-        weeks: weeks
-            .iter()
-            .copied()
-            .filter(|w| w.monday.plus_days(6) >= cutoff)
-            .collect(),
-    };
-    let default_range = if recent.sessions.is_empty() {
+    let views = views(metrics, args, &sessions, cutoff);
+    // The page opens on the recent range, unless there is nothing in it.
+    let default_range = if views[0].sessions.is_empty() {
         "all"
     } else {
         "recent"
     };
-    let all = View {
-        key: "all",
-        sessions: sessions.clone(),
-        weeks,
-    };
-    let views = [recent, all];
     let routes = charted_routes(&sessions);
 
-    let map_head = if args.map {
-        format!(
-            "<!-- Leaflet 1.9.4\n{LEAFLET_LICENSE}-->\n<style>\n{LEAFLET_CSS}{MAP_CSS}</style>\n"
-        )
-    } else {
-        String::new()
-    };
-    let mut page = String::new();
-    page.push_str(&format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>Running report</title>\n{map_head}<style>\n{CSS}</style>\n</head>\n\
-         <body data-range=\"{default_range}\"{editable}>\n",
-        editable = if args.serve { " data-editable" } else { "" }
-    ));
+    let mut page = head(args, default_range);
     page.push_str(&header(&sessions, args));
     page.push_str(&nav(default_range, args.map));
     page.push_str("<main>\n");
@@ -170,6 +138,53 @@ pub fn render(metrics: &Metrics, args: &Args, reference: Date) -> String {
     }
     page.push_str("</body>\n</html>\n");
     page
+}
+
+/// The two choices on the range toggle: the recent half year, then everything.
+fn views<'m, 'a>(
+    metrics: &'m Metrics<'a>,
+    args: &Args,
+    sessions: &[&'m Session<'a>],
+    cutoff: Date,
+) -> [View<'m, 'a>; 2] {
+    let weeks: Vec<&Week> = metrics.weeks.iter().filter(|w| w.in_range(args)).collect();
+    let recent = View {
+        key: "recent",
+        sessions: sessions
+            .iter()
+            .copied()
+            .filter(|s| s.activity.date >= cutoff)
+            .collect(),
+        weeks: weeks
+            .iter()
+            .copied()
+            .filter(|w| w.monday.plus_days(6) >= cutoff)
+            .collect(),
+    };
+    let all = View {
+        key: "all",
+        sessions: sessions.to_vec(),
+        weeks,
+    };
+    [recent, all]
+}
+
+/// The doctype, the head with the inline styles, and the opening body tag.
+fn head(args: &Args, default_range: &str) -> String {
+    let map_head = if args.map {
+        format!(
+            "<!-- Leaflet 1.9.4\n{LEAFLET_LICENSE}-->\n<style>\n{LEAFLET_CSS}{MAP_CSS}</style>\n"
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
+         <title>Running report</title>\n{map_head}<style>\n{CSS}</style>\n</head>\n\
+         <body data-range=\"{default_range}\"{editable}>\n",
+        editable = if args.serve { " data-editable" } else { "" }
+    )
 }
 
 /// Text made safe for HTML content and quoted attributes.

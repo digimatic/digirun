@@ -298,6 +298,27 @@ fn routes_of<'m, 'a>(sessions: &[&'m Session<'a>]) -> Vec<Route<'m, 'a>> {
     routes
 }
 
+/// A legend entry per route in colour, and one for all the others.
+fn overview_legend(shown: &[&Route], colours: &[(usize, &'static str)]) -> String {
+    let entries: String = shown
+        .iter()
+        .filter(|r| r.colour(colours) != "other")
+        .map(|r| {
+            format!(
+                "<span class=\"entry\"><span class=\"stroke {}\"></span>{}</span>",
+                r.colour(colours),
+                esc(r.name())
+            )
+        })
+        .collect();
+    let others = if shown.iter().any(|r| r.colour(colours) == "other") {
+        "<span class=\"entry\"><span class=\"stroke other\"></span>Other routes</span>"
+    } else {
+        ""
+    };
+    format!("{entries}{others}")
+}
+
 /// All the routes on one picture, leaving out any that start far from the rest.
 fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: bool) -> String {
     let starts: Vec<Point> = routes
@@ -353,22 +374,7 @@ fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: b
     body.push_str(&hits);
     body.push_str(&scale_bar(&frame, OVERVIEW_SIZE));
 
-    let entries: String = shown
-        .iter()
-        .filter(|r| r.colour(colours) != "other")
-        .map(|r| {
-            format!(
-                "<span class=\"entry\"><span class=\"stroke {}\"></span>{}</span>",
-                r.colour(colours),
-                esc(r.name())
-            )
-        })
-        .collect();
-    let others = if shown.iter().any(|r| r.colour(colours) == "other") {
-        "<span class=\"entry\"><span class=\"stroke other\"></span>Other routes</span>"
-    } else {
-        ""
-    };
+    let keys = overview_legend(&shown, colours);
     let left_out = routes.len() - shown.len();
     let note = if left_out > 0 {
         format!(
@@ -405,7 +411,7 @@ fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: b
         ("", String::new())
     };
     format!(
-        "<figure class=\"chart overview-map{has_map}\"><div class=\"legend\">{entries}{others}</div>{}{host}{note}</figure>\n",
+        "<figure class=\"chart overview-map{has_map}\"><div class=\"legend\">{keys}</div>{}{host}{note}</figure>\n",
         svg(OVERVIEW_SIZE, "All routes", &body)
     )
 }
