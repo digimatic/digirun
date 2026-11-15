@@ -1,6 +1,8 @@
 //! Command-line arguments and their defaults.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use crate::dt::Date;
 use crate::format::py_num;
@@ -138,7 +140,7 @@ pub struct Args {
     pub start: Option<Date>,
     pub end: Option<Date>,
     /// Activity types to analyze; None means "all".
-    pub types: Option<std::collections::BTreeSet<String>>,
+    pub types: Option<BTreeSet<String>>,
     pub jobs: usize,
     pub method: Method,
     pub cadence_threshold: i64,
@@ -156,7 +158,7 @@ pub struct Args {
     /// `--days N`, already resolved into `start`; kept for the report header.
     pub days: Option<i64>,
     /// Activity ids to analyze; None means all in range.
-    pub activities: Option<std::collections::BTreeSet<String>>,
+    pub activities: Option<BTreeSet<String>>,
     pub min_pass: i64,
     pub smooth: i64,
     /// Maximum heart rate; HR zones and TRIMP need it, and it is never guessed.
@@ -183,7 +185,7 @@ pub fn default_jobs() -> usize {
 }
 
 /// The types analyzed by default; `--type all` turns the filter off.
-fn default_types() -> Option<std::collections::BTreeSet<String>> {
+fn default_types() -> Option<BTreeSet<String>> {
     Some(
         DEFAULT_TYPES
             .split(',')
@@ -659,6 +661,26 @@ pub fn help() -> String {
     lines.join("\n")
 }
 
+/// An integer option value, with argparse's error for anything else.
+fn int<T: FromStr>(flag: &str, raw: &str) -> Result<T, CliError> {
+    raw.parse::<T>().map_err(|_| {
+        CliError::argument(format!(
+            "argument {flag}: invalid int value: {}",
+            quoted(raw)
+        ))
+    })
+}
+
+/// A comma-separated option value as a set, or None when it names nothing.
+fn list(raw: &str) -> Option<BTreeSet<String>> {
+    let set: BTreeSet<String> = raw
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    (!set.is_empty()).then_some(set)
+}
+
 /// Parse argv (without the program name).
 pub fn parse(argv: &[String]) -> Result<Args, CliError> {
     parse_with_today(argv, Date::today())
@@ -703,26 +725,9 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
             "--end" => args.end = Some(parse_date(&value(&mut i)?, "end date")?),
             "--type" => {
                 let raw = value(&mut i)?;
-                if raw == "all" {
-                    args.types = None;
-                } else {
-                    let set: std::collections::BTreeSet<String> = raw
-                        .split(',')
-                        .map(|t| t.trim().to_string())
-                        .filter(|t| !t.is_empty())
-                        .collect();
-                    args.types = if set.is_empty() { None } else { Some(set) };
-                }
+                args.types = if raw == "all" { None } else { list(&raw) };
             }
-            "--jobs" => {
-                let raw = value(&mut i)?;
-                args.jobs = raw.parse::<i64>().map_err(|_| {
-                    CliError::argument(format!(
-                        "argument --jobs: invalid int value: {}",
-                        quoted(&raw)
-                    ))
-                })? as usize;
-            }
+            "--jobs" => args.jobs = int::<i64>(flag, &value(&mut i)?)? as usize,
             "--method" => {
                 let raw = value(&mut i)?;
                 args.method = match raw.as_str() {
@@ -739,36 +744,12 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                     }
                 };
             }
-            "--cadence-threshold" => {
-                let raw = value(&mut i)?;
-                args.cadence_threshold = raw.parse::<i64>().map_err(|_| {
-                    CliError::argument(format!(
-                        "argument --cadence-threshold: invalid int value: {}",
-                        quoted(&raw)
-                    ))
-                })?;
-            }
+            "--cadence-threshold" => args.cadence_threshold = int(flag, &value(&mut i)?)?,
             "--pace-threshold" => {
                 args.pace_threshold = parse_pace(&value(&mut i)?, "pace")?;
             }
-            "--window" => {
-                let raw = value(&mut i)?;
-                args.window = raw.parse::<i64>().map_err(|_| {
-                    CliError::argument(format!(
-                        "argument --window: invalid int value: {}",
-                        quoted(&raw)
-                    ))
-                })?;
-            }
-            "--min-segment" => {
-                let raw = value(&mut i)?;
-                args.min_segment = raw.parse::<i64>().map_err(|_| {
-                    CliError::argument(format!(
-                        "argument --min-segment: invalid int value: {}",
-                        quoted(&raw)
-                    ))
-                })?;
-            }
+            "--window" => args.window = int(flag, &value(&mut i)?)?,
+            "--min-segment" => args.min_segment = int(flag, &value(&mut i)?)?,
             "--min-distance" => {
                 let raw = value(&mut i)?;
                 args.min_distance = raw.parse::<f64>().map_err(|_| {
@@ -784,15 +765,7 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                     )));
                 }
             }
-            "--gap" => {
-                let raw = value(&mut i)?;
-                args.gap = raw.parse::<i64>().map_err(|_| {
-                    CliError::argument(format!(
-                        "argument --gap: invalid int value: {}",
-                        quoted(&raw)
-                    ))
-                })?;
-            }
+            "--gap" => args.gap = int(flag, &value(&mut i)?)?,
             // Python treats a pace guard of 0 as "not set", so the same is done here.
             "--max-pace" => {
                 args.max_pace = Some(parse_pace(&value(&mut i)?, "max pace")?).filter(|v| *v != 0)
@@ -840,13 +813,7 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                 args.show = show;
             }
             "--days" => {
-                let raw = value(&mut i)?;
-                let days = raw.parse::<i64>().map_err(|_| {
-                    CliError::argument(format!(
-                        "argument --days: invalid int value: {}",
-                        quoted(&raw)
-                    ))
-                })?;
+                let days = int(flag, &value(&mut i)?)?;
                 if days < 1 {
                     return Err(CliError::argument(format!(
                         "argument --days: must be at least 1, got {days}"
@@ -854,40 +821,11 @@ pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> 
                 }
                 args.days = Some(days);
             }
-            "--activity" => {
-                let set: std::collections::BTreeSet<String> = value(&mut i)?
-                    .split(',')
-                    .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty())
-                    .collect();
-                args.activities = if set.is_empty() { None } else { Some(set) };
-            }
-            "--min-pass" => {
-                let raw = value(&mut i)?;
-                args.min_pass = raw.parse::<i64>().map_err(|_| {
-                    CliError::argument(format!(
-                        "argument --min-pass: invalid int value: {}",
-                        quoted(&raw)
-                    ))
-                })?;
-            }
-            "--smooth" => {
-                let raw = value(&mut i)?;
-                args.smooth = raw.parse::<i64>().map_err(|_| {
-                    CliError::argument(format!(
-                        "argument --smooth: invalid int value: {}",
-                        quoted(&raw)
-                    ))
-                })?;
-            }
+            "--activity" => args.activities = list(&value(&mut i)?),
+            "--min-pass" => args.min_pass = int(flag, &value(&mut i)?)?,
+            "--smooth" => args.smooth = int(flag, &value(&mut i)?)?,
             "--hr-max" => {
-                let raw = value(&mut i)?;
-                let bpm = raw.parse::<i64>().map_err(|_| {
-                    CliError::argument(format!(
-                        "argument --hr-max: invalid int value: {}",
-                        quoted(&raw)
-                    ))
-                })?;
+                let bpm = int(flag, &value(&mut i)?)?;
                 if !(100..=250).contains(&bpm) {
                     return Err(CliError::argument(format!(
                         "argument --hr-max: must be between 100 and 250, got {bpm}"
