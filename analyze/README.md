@@ -13,7 +13,8 @@ cargo test --manifest-path analyze/Cargo.toml
 ```
 
 CI (`.github/workflows/analyze.yml`) also requires `cargo fmt --check` and
-`cargo clippy --all-targets -- -D warnings` to pass.
+`cargo clippy --all-targets -- -D warnings` to pass, with the toolchain pinned
+in `rust-toolchain.toml`.
 
 Run it from the repo root, because the default `--out` is `./runs`:
 

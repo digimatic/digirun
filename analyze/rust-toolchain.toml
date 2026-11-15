@@ -1,0 +1,5 @@
+# Used by rustup for local builds and CI alike. Pinned so a new release's
+# clippy lints don't fail unchanged code; bump it by hand.
+[toolchain]
+channel = "1.100.0"
+components = ["clippy", "rustfmt"]
