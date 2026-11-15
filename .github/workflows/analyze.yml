@@ -21,8 +21,11 @@ jobs:
         working-directory: analyze
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned so a new release's clippy lints don't fail unchanged code;
+      # bump it by hand.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.100.0
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
