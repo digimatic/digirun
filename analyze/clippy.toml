@@ -1,0 +1,3 @@
+# Clippy's defaults, stated so they are easy to find and change.
+too-many-lines-threshold = 100
+cognitive-complexity-threshold = 25

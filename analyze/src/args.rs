@@ -334,6 +334,7 @@ struct Group {
 }
 
 /// The help groups, in the order argparse prints them.
+#[allow(clippy::too_many_lines)] // the help text of every option, as data
 fn groups() -> Vec<Group> {
     let jobs = default_jobs();
     // argparse joins choices in the metavar without spaces.
@@ -680,6 +681,7 @@ pub fn parse(argv: &[String]) -> Result<Args, CliError> {
 }
 
 /// `parse`, with the date `--days` counts back from when there is no `--end`.
+#[allow(clippy::too_many_lines)] // one short match arm per option
 pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> {
     let mut args = Args::default();
     let mut i = 0;
