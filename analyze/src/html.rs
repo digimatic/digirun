@@ -13,15 +13,15 @@ use std::path::Path;
 use crate::analyze::{RUN, WALK};
 use crate::args::Args;
 use crate::dt::Date;
+use crate::format::{change, duration_or_dash, fmt_duration, fmt_pace};
 use crate::map::{routes_section, session_map};
 use crate::metrics::{
     EFFORT_DISTANCES_M, Effort, Metrics, RUNNING_EFFORT_SHARE, Session, Week, ZONES,
     prediction_source, previous_weeks, riegel, sessions_in_range, vdot,
 };
+use crate::num::mean_of;
 use crate::passes::{Pass, build_passes};
-use crate::report::{
-    change, fastest, fmt_duration, fmt_pace, km_load, mean_of, trimp_load, typical_gain,
-};
+use crate::report::{fastest, km_load, trimp_load, typical_gain};
 
 const CSS: &str = include_str!("report.css");
 const JS: &str = include_str!("report.js");
@@ -339,14 +339,6 @@ fn overview(metrics: &Metrics, args: &Args, reference: Date) -> String {
              <div class=\"cards\">\n{cards}</div>\n"
         ));
     })
-}
-
-fn duration_or_dash(seconds: f64) -> String {
-    if seconds > 0.0 {
-        fmt_duration(seconds)
-    } else {
-        "-".to_string()
-    }
 }
 
 fn week_tip(week: &Week, lines: &[String]) -> String {

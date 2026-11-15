@@ -5,9 +5,10 @@
 //! from a rolling median of cadence with a hysteresis band, runs of the same label
 //! become passes, and passes shorter than `--min-pass` join a neighbour.
 
-use crate::analyze::{RUN, WALK, mean, round, stdev};
+use crate::analyze::{RUN, WALK};
 use crate::args::{AMBIGUOUS_CADENCE, Args, Method};
 use crate::model::{Activity, Point, haversine};
+use crate::num::{mean, median, round, stdev};
 
 /// What the labels of a pass came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,16 +115,6 @@ pub(crate) fn steps(points: &[Point], args: &Args) -> Vec<Step> {
         });
     }
     out
-}
-
-pub(crate) fn median(values: &mut [f64]) -> f64 {
-    values.sort_by(|a, b| a.total_cmp(b));
-    let n = values.len();
-    if n % 2 == 1 {
-        values[n / 2]
-    } else {
-        (values[n / 2 - 1] + values[n / 2]) / 2.0
-    }
 }
 
 /// Seconds since the first point, for each point.

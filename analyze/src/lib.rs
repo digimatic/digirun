@@ -13,12 +13,14 @@ pub mod args;
 pub mod csv;
 pub mod csvout;
 pub mod dt;
+pub mod format;
 pub mod html;
 pub mod load;
 pub mod map;
 pub mod metrics;
 pub mod model;
 pub mod naming;
+pub mod num;
 pub mod parse;
 pub mod passes;
 pub mod report;
@@ -180,7 +182,7 @@ pub fn run(args: &Args) -> i32 {
     if let Some(max) = args.max_pace {
         let mut note = format!(
             "Max pace: slower than {}/km excluded",
-            report::fmt_pace(max as f64)
+            format::fmt_pace(max as f64)
         );
         if args.show.segments() {
             note.push_str(&format!(" ({dropped_slow} segments)"));
@@ -190,7 +192,7 @@ pub fn run(args: &Args) -> i32 {
     if let Some(min) = args.min_pace {
         let mut note = format!(
             "Min pace: faster than {}/km excluded",
-            report::fmt_pace(min as f64)
+            format::fmt_pace(min as f64)
         );
         if args.show.segments() {
             note.push_str(&format!(" ({dropped_fast} segments)"));

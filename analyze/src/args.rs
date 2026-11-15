@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use crate::dt::Date;
-use crate::report::py_num;
+use crate::format::py_num;
 
 pub const DEFAULT_OUT: &str = "./runs";
 pub const DEFAULT_REPORT_DIR: &str = "./runs/analysis";

@@ -10,7 +10,8 @@ use crate::analyze::{RUN, WALK, in_range};
 use crate::args::Args;
 use crate::dt::Date;
 use crate::model::{Activity, Point, haversine};
-use crate::passes::{Pass, Step, build_passes, median, offsets, smoothed_altitude, steps, totals};
+use crate::num::median;
+use crate::passes::{Pass, Step, build_passes, offsets, smoothed_altitude, steps, totals};
 
 pub const ZONES: usize = 5;
 pub const EFFORT_DISTANCES_M: [f64; 3] = [1000.0, 3000.0, 5000.0];

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use garmin_analyze::analyze::{
-    build_segments, classify, filter_activities, filter_segments, in_range, round, stats,
+    build_segments, classify, filter_activities, filter_segments, in_range, stats,
 };
 use garmin_analyze::args::{Args, Method, Tables, help, parse, parse_with_today};
 use garmin_analyze::csvout::write_csvs;
@@ -18,6 +18,7 @@ use garmin_analyze::metrics::{
 };
 use garmin_analyze::model::{Activity, Lap, Point, Segment, haversine};
 use garmin_analyze::naming::{Change, ask, recent_routes, rewrite};
+use garmin_analyze::num::round;
 use garmin_analyze::parse::{read_gpx, read_tcx};
 use garmin_analyze::passes::{Source, build_passes, climbs};
 use garmin_analyze::serve::{Request, State, decode_form, handle};

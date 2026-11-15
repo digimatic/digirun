@@ -4,31 +4,10 @@ use std::collections::BTreeSet;
 
 use crate::args::{Args, Method};
 use crate::model::{Activity, Point, Segment, Stats};
+use crate::num::{mean, round, stdev};
 
 pub const RUN: &str = "run";
 pub const WALK: &str = "walk";
-
-/// Python's `round(value, digits)`: the correctly rounded decimal, read back as
-/// a float, so the CSVs hold short, stable numbers.
-pub fn round(value: f64, digits: usize) -> f64 {
-    format!("{:.*}", digits, value)
-        .parse::<f64>()
-        .unwrap_or(value)
-}
-
-pub(crate) fn mean(values: &[f64]) -> f64 {
-    values.iter().sum::<f64>() / values.len() as f64
-}
-
-/// Sample standard deviation (`statistics.stdev`), which needs at least two values.
-pub(crate) fn stdev(values: &[f64]) -> f64 {
-    if values.len() < 2 {
-        return 0.0;
-    }
-    let m = mean(values);
-    let sum: f64 = values.iter().map(|v| (v - m) * (v - m)).sum();
-    (sum / (values.len() - 1) as f64).sqrt()
-}
 
 /// Return "run" or "walk" for one segment.
 pub fn classify(pace: f64, cadence: Option<f64>, args: &Args) -> &'static str {

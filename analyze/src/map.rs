@@ -10,6 +10,7 @@ use crate::analyze::RUN;
 use crate::html::esc;
 use crate::metrics::Session;
 use crate::model::{Activity, Point};
+use crate::num::upper_median;
 use crate::passes::Pass;
 use crate::report::typical_gain;
 
@@ -298,11 +299,6 @@ fn routes_of<'m, 'a>(sessions: &[&'m Session<'a>]) -> Vec<Route<'m, 'a>> {
     routes
 }
 
-fn median(mut values: Vec<f64>) -> f64 {
-    values.sort_by(f64::total_cmp);
-    values[values.len() / 2]
-}
-
 /// All the routes on one picture, leaving out any that start far from the rest.
 fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: bool) -> String {
     let starts: Vec<Point> = routes
@@ -312,12 +308,14 @@ fn overview_map(routes: &[Route], colours: &[(usize, &'static str)], with_map: b
     if starts.is_empty() {
         return String::new();
     }
-    let cos_lat = median(starts.iter().map(|p| p.lat).collect())
+    // starts is not empty, so there always is a median.
+    let middle = |values: Vec<f64>| upper_median(values).unwrap_or_default();
+    let cos_lat = middle(starts.iter().map(|p| p.lat).collect())
         .to_radians()
         .cos();
     let centre = (
-        median(starts.iter().map(|p| metres(p, cos_lat).0).collect()),
-        median(starts.iter().map(|p| metres(p, cos_lat).1).collect()),
+        middle(starts.iter().map(|p| metres(p, cos_lat).0).collect()),
+        middle(starts.iter().map(|p| metres(p, cos_lat).1).collect()),
     );
     let near = |route: &&Route| {
         route
