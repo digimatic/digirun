@@ -12,6 +12,9 @@ cargo build --release --manifest-path analyze/Cargo.toml
 cargo test --manifest-path analyze/Cargo.toml
 ```
 
+CI (`.github/workflows/analyze.yml`) also requires `cargo fmt --check` and
+`cargo clippy --all-targets -- -D warnings` to pass.
+
 Run it from the repo root, because the default `--out` is `./runs`:
 
 ```bash
