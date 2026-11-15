@@ -2,10 +2,10 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::str::FromStr;
+
+use clap::{CommandFactory, Parser, ValueEnum};
 
 use crate::dt::Date;
-use crate::format::py_num;
 
 pub const DEFAULT_OUT: &str = "./runs";
 pub const DEFAULT_REPORT_DIR: &str = "./runs/analysis";
@@ -24,20 +24,6 @@ pub const DEFAULT_MIN_PASS_S: i64 = 20; // shorter passes are absorbed into a ne
 pub const DEFAULT_PORT: u16 = 8765; // --serve listens here, on 127.0.0.1 only
 pub const DEFAULT_NAMING_DAYS: i64 = 30; // --name-routes asks about this many days
 pub const DEFAULT_SMOOTH_S: i64 = 10; // rolling-median width for cadence in the detail table
-
-pub const METHODS: [&str; 4] = ["hybrid", "cadence", "pace", "lap"];
-pub const SHOW_TABLES: [&str; 10] = [
-    "activities",
-    "weekly",
-    "overall",
-    "detail",
-    "summary",
-    "progress",
-    "zones",
-    "fitness",
-    "efforts",
-    "all",
-];
 
 /// Which report tables to print.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +83,32 @@ impl Tables {
     pub fn metrics(&self) -> bool {
         self.summary || self.progress || self.zones || self.fitness || self.efforts
     }
+
+    /// Parse `--show`: 'all' or comma-separated table names.
+    fn parse(raw: &str) -> Result<Tables, String> {
+        let mut show = Tables::none();
+        for name in raw.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+            match name {
+                "activities" => show.activities = true,
+                "weekly" => show.weekly = true,
+                "overall" => show.overall = true,
+                "detail" => show.detail = true,
+                "summary" => show.summary = true,
+                "progress" => show.progress = true,
+                "zones" => show.zones = true,
+                "fitness" => show.fitness = true,
+                "efforts" => show.efforts = true,
+                "all" => show = Tables::all(),
+                _ => {
+                    return Err(format!(
+                        "invalid choice '{name}' (choose from activities, weekly, overall, \
+                         detail, summary, progress, zones, fitness, efforts, all)"
+                    ));
+                }
+            }
+        }
+        Ok(show)
+    }
 }
 
 impl Default for Tables {
@@ -111,11 +123,7 @@ impl Default for Tables {
     }
 }
 
-const PROG: &str = "garmin-analyze";
-const DESCRIPTION: &str =
-    "Split downloaded runs into walk and run segments and report pace mean + stdev per class.";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Method {
     Hybrid,
     Cadence,
@@ -183,44 +191,9 @@ pub fn default_jobs() -> usize {
         .min(8)
 }
 
-/// The types analyzed by default; `--type all` turns the filter off.
-fn default_types() -> Option<BTreeSet<String>> {
-    list(DEFAULT_TYPES)
-}
-
 impl Default for Args {
     fn default() -> Args {
-        Args {
-            out: PathBuf::from(DEFAULT_OUT),
-            start: None,
-            end: None,
-            types: default_types(),
-            jobs: default_jobs(),
-            method: Method::Hybrid,
-            cadence_threshold: DEFAULT_CADENCE_THRESHOLD,
-            pace_threshold: DEFAULT_PACE_THRESHOLD,
-            window: DEFAULT_WINDOW,
-            min_segment: DEFAULT_MIN_SEGMENT,
-            min_distance: DEFAULT_MIN_DISTANCE_M,
-            gap: DEFAULT_GAP_S,
-            max_pace: None,
-            min_pace: None,
-            report_dir: PathBuf::from(DEFAULT_REPORT_DIR),
-            cadence_stats: false,
-            no_csv: false,
-            show: Tables::default(),
-            days: None,
-            activities: None,
-            min_pass: DEFAULT_MIN_PASS_S,
-            smooth: DEFAULT_SMOOTH_S,
-            hr_max: None,
-            html: None,
-            map: false,
-            route_names: None,
-            name_routes: false,
-            serve: false,
-            port: DEFAULT_PORT,
-        }
+        Cli::parse_from(["garmin-analyze"]).into_args()
     }
 }
 
@@ -232,437 +205,39 @@ pub struct CliError {
     pub stdout: bool,
 }
 
-impl CliError {
-    /// A failure the program raises itself, printed without the usage block.
-    fn error(message: impl Into<String>) -> CliError {
+impl From<clap::Error> for CliError {
+    fn from(error: clap::Error) -> CliError {
         CliError {
-            code: 1,
-            message: message.into(),
-            stdout: false,
+            code: error.exit_code(),
+            message: error.render().to_string().trim_end().to_string(),
+            stdout: !error.use_stderr(),
         }
-    }
-
-    /// A bad argument, formatted the way argparse prints it: usage, then `prog: error: ...`.
-    fn argument(detail: impl AsRef<str>) -> CliError {
-        CliError {
-            code: 2,
-            message: format!("{}\n{PROG}: error: {}", usage(), detail.as_ref()),
-            stdout: false,
-        }
-    }
-}
-
-/// Python's repr of a string, which prefers single quotes.
-fn quoted(value: &str) -> String {
-    if value.contains('\'') && !value.contains('"') {
-        format!("\"{value}\"")
-    } else {
-        format!("'{value}'")
     }
 }
 
 /// Accept `9:00`, `9:30` or plain seconds.
-pub fn parse_pace(value: &str, name: &str) -> Result<i64, CliError> {
-    if value.contains(':') {
-        let parts: Vec<&str> = value.split(':').collect();
-        if parts.len() >= 2
-            && let (Ok(minutes), Ok(seconds)) = (parts[0].parse::<i64>(), parts[1].parse::<i64>())
-        {
+pub fn parse_pace(value: &str) -> Result<i64, String> {
+    if let Some((minutes, seconds)) = value.split_once(':') {
+        if let (Ok(minutes), Ok(seconds)) = (minutes.parse::<i64>(), seconds.parse::<i64>()) {
             return Ok(minutes * 60 + seconds);
         }
     } else if let Ok(seconds) = value.parse::<f64>() {
         return Ok(seconds as i64);
     }
-    Err(CliError::error(format!(
-        "error: invalid {name} {}, expected M:SS",
-        quoted(value)
-    )))
+    Err("expected M:SS or seconds".to_string())
 }
 
 /// Accept `YYYY-MM-DD`.
-pub fn parse_date(value: &str, name: &str) -> Result<Date, CliError> {
-    match Date::from_iso(value) {
-        Some(date) => Ok(date),
-        None => Err(CliError::error(format!(
-            "error: invalid {name} {}, expected YYYY-MM-DD",
-            quoted(value)
-        ))),
-    }
+pub fn parse_date(value: &str) -> Result<Date, String> {
+    Date::from_iso(value).ok_or_else(|| "expected YYYY-MM-DD".to_string())
 }
 
-struct Action {
-    /// Option strings, e.g. `["-h", "--help"]`. The usage line uses the first one.
-    strings: Vec<String>,
-    /// Empty for flags that take no value.
-    metavar: String,
-    help: String,
-}
-
-impl Action {
-    fn new(strings: &[&str], metavar: &str, help: String) -> Action {
-        Action {
-            strings: strings.iter().map(ToString::to_string).collect(),
-            metavar: metavar.to_string(),
-            help,
-        }
-    }
-
-    /// How the action is listed in the help body: every option string, then the metavar.
-    fn invocation(&self) -> String {
-        let options = self.strings.join(", ");
-        if self.metavar.is_empty() {
-            options
-        } else {
-            format!("{options} {metavar}", metavar = self.metavar)
-        }
-    }
-
-    /// How the action appears in the usage line: the first option string only.
-    fn usage_part(&self) -> String {
-        let first = self.strings.first().map_or_default(String::as_str);
-        if self.metavar.is_empty() {
-            format!("[{first}]")
-        } else {
-            format!("[{first} {metavar}]", metavar = self.metavar)
-        }
-    }
-}
-
-struct Group {
-    title: String,
-    actions: Vec<Action>,
-}
-
-/// The help groups, in the order argparse prints them.
-#[allow(clippy::too_many_lines)] // the help text of every option, as data
-fn groups() -> Vec<Group> {
-    let jobs = default_jobs();
-    // argparse joins choices in the metavar without spaces.
-    let method_choices = format!("{{{}}}", METHODS.join(","));
-    vec![
-        Group {
-            title: "options".to_string(),
-            actions: vec![Action::new(
-                &["-h", "--help"],
-                "",
-                "show this help message and exit".to_string(),
-            )],
-        },
-        Group {
-            title: "input".to_string(),
-            actions: vec![
-                Action::new(
-                    &["--out"],
-                    "OUT",
-                    format!("directory of downloaded files (default: {DEFAULT_OUT})"),
-                ),
-                Action::new(
-                    &["--route-names"],
-                    "PATH",
-                    "route names, one '<activity id> = <name>' per line; any session of a route names it (default: routes.txt in --out)".to_string(),
-                ),
-                Action::new(
-                    &["--start"],
-                    "YYYY-MM-DD",
-                    "only activities from this date".to_string(),
-                ),
-                Action::new(
-                    &["--end"],
-                    "YYYY-MM-DD",
-                    "only activities up to this date".to_string(),
-                ),
-                Action::new(
-                    &["--days"],
-                    "N",
-                    "only the last N days, up to --end or today (not with --start)".to_string(),
-                ),
-                Action::new(
-                    &["--activity"],
-                    "ID",
-                    "only these comma-separated activity ids".to_string(),
-                ),
-                Action::new(
-                    &["--type"],
-                    "TYPE",
-                    format!(
-                        "activity types to analyze: 'all' or comma-separated keys (default: {DEFAULT_TYPES}); types come from summary.csv"
-                    ),
-                ),
-                Action::new(
-                    &["--jobs"],
-                    "N",
-                    format!(
-                        "worker threads used to parse the files (default: {jobs} = min(cpu_count, 8); 1 runs single-threaded)"
-                    ),
-                ),
-            ],
-        },
-        Group {
-            title: "classification".to_string(),
-            actions: vec![
-                Action::new(
-                    &["--method"],
-                    &method_choices,
-                    "how to tell walk from run (default: hybrid)".to_string(),
-                ),
-                Action::new(
-                    &["--cadence-threshold"],
-                    "CADENCE_THRESHOLD",
-                    format!(
-                        "strides/min at or above which a segment is a run (default: {DEFAULT_CADENCE_THRESHOLD})"
-                    ),
-                ),
-                Action::new(
-                    &["--pace-threshold"],
-                    "PACE_THRESHOLD",
-                    format!(
-                        "pace cutoff as M:SS or seconds (default: {DEFAULT_PACE_THRESHOLD}s = 9:00/km)"
-                    ),
-                ),
-            ],
-        },
-        Group {
-            title: "segmentation".to_string(),
-            actions: vec![
-                Action::new(
-                    &["--window"],
-                    "WINDOW",
-                    format!("seconds of track per segment (default: {DEFAULT_WINDOW})"),
-                ),
-                Action::new(
-                    &["--min-segment"],
-                    "MIN_SEGMENT",
-                    format!(
-                        "ignore segments shorter than this many seconds (default: {DEFAULT_MIN_SEGMENT})"
-                    ),
-                ),
-                Action::new(
-                    &["--min-distance"],
-                    "MIN_DISTANCE",
-                    format!(
-                        "ignore segments shorter than this many metres (default: {})",
-                        py_num(DEFAULT_MIN_DISTANCE_M)
-                    ),
-                ),
-                Action::new(
-                    &["--gap"],
-                    "GAP",
-                    format!("a pause longer than this ends the segment (default: {DEFAULT_GAP_S}s)"),
-                ),
-                Action::new(
-                    &["--max-pace"],
-                    "M:SS",
-                    "exclude segments slower than this from the stats, e.g. 15:00 (useful for filtering out standing-about segments)".to_string(),
-                ),
-                Action::new(
-                    &["--min-pace"],
-                    "M:SS",
-                    "exclude segments faster than this from the stats, e.g. 3:00 (drops GPS-glitch segments no human could cover)".to_string(),
-                ),
-            ],
-        },
-        Group {
-            title: "detail".to_string(),
-            actions: vec![
-                Action::new(
-                    &["--min-pass"],
-                    "MIN_PASS",
-                    format!(
-                        "passes shorter than this many seconds join a neighbour (default: {DEFAULT_MIN_PASS_S})"
-                    ),
-                ),
-                Action::new(
-                    &["--smooth"],
-                    "SMOOTH",
-                    format!(
-                        "seconds of rolling median applied to cadence (default: {DEFAULT_SMOOTH_S})"
-                    ),
-                ),
-            ],
-        },
-        Group {
-            title: "metrics".to_string(),
-            actions: vec![Action::new(
-                &["--hr-max"],
-                "BPM",
-                "maximum heart rate, needed for HR zones, TRIMP and pace in zone 3".to_string(),
-            )],
-        },
-        Group {
-            title: "output".to_string(),
-            actions: vec![
-                Action::new(
-                    &["--report-dir"],
-                    "REPORT_DIR",
-                    format!(
-                        "where analysis.csv and segments.csv (passes.csv with --show detail, sessions.csv and weeks.csv with the metric tables) are written (default: {DEFAULT_REPORT_DIR})"
-                    ),
-                ),
-                Action::new(
-                    &["--cadence-stats"],
-                    "",
-                    "also report cadence mean + stdev in strides/min".to_string(),
-                ),
-                Action::new(
-                    &["--show"],
-                    "TABLES",
-                    "report tables to print: 'all' or comma-separated activities,weekly,overall,detail,summary,progress,zones,fitness,efforts (default: activities,weekly,overall); detail lists every run/walk pass, split on cadence, with its stats".to_string(),
-                ),
-                Action::new(&["--no-csv"], "", "print the report only".to_string()),
-                Action::new(
-                    &["--serve"],
-                    "",
-                    "serve the HTML report on 127.0.0.1 instead of reporting, with route cards you can rename; names are saved to the --route-names file".to_string(),
-                ),
-                Action::new(
-                    &["--port"],
-                    "N",
-                    format!("port for --serve (default: {DEFAULT_PORT})"),
-                ),
-                Action::new(
-                    &["--name-routes"],
-                    "",
-                    format!("ask for a name for each route run in the range (default: the last {DEFAULT_NAMING_DAYS} days) and write them to the --route-names file instead of reporting"),
-                ),
-                Action::new(
-                    &["--html"],
-                    "PATH",
-                    "also write the metrics as one self-contained HTML page with charts, whatever --show picks".to_string(),
-                ),
-                Action::new(
-                    &["--map"],
-                    "",
-                    "add a satellite map to the HTML report, with a button to turn it off; the page then holds GPS positions and fetches imagery from EOX when opened".to_string(),
-                ),
-            ],
-        },
-    ]
-}
-
-/// argparse formats at the terminal width, which falls back to 80 columns when
-/// the output is not a terminal. COLUMNS is honoured the same way.
-fn format_width() -> usize {
-    let columns = std::env::var("COLUMNS")
+fn parse_distance(value: &str) -> Result<f64, String> {
+    value
+        .parse::<f64>()
         .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(80);
-    columns.saturating_sub(2)
-}
-
-/// Greedy word wrapping, as textwrap.wrap does it.
-fn wrap(text: &str, width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut line = String::new();
-    for word in text.split_whitespace() {
-        if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > width {
-            lines.push(std::mem::take(&mut line));
-        }
-        if !line.is_empty() {
-            line.push(' ');
-        }
-        line.push_str(word);
-    }
-    if !line.is_empty() {
-        lines.push(line);
-    }
-    lines
-}
-
-pub fn usage() -> String {
-    let action_groups = groups();
-    let parts: Vec<String> = action_groups
-        .iter()
-        .flat_map(|group| group.actions.iter())
-        .map(Action::usage_part)
-        .collect();
-    let width = format_width();
-    let prefix = "usage: ";
-    let single = format!("{prefix}{PROG} {}", parts.join(" "));
-    if single.chars().count() <= width {
-        return single;
-    }
-
-    // Too long for one line: put the parts on continuation lines, as argparse does.
-    let indent = " ".repeat(prefix.chars().count() + PROG.chars().count() + 1);
-    let mut lines = Vec::new();
-    let mut current: Vec<String> = Vec::new();
-    // The first line starts with the prefix instead of the indent.
-    let mut length = prefix.chars().count() - 1;
-    for part in std::iter::once(PROG.to_string()).chain(parts) {
-        if !current.is_empty() && length + 1 + part.chars().count() > width {
-            lines.push(format!("{indent}{}", current.join(" ")));
-            current.clear();
-            length = indent.chars().count() - 1;
-        }
-        length += 1 + part.chars().count();
-        current.push(part);
-    }
-    if !current.is_empty() {
-        lines.push(format!("{indent}{}", current.join(" ")));
-    }
-
-    let mut out = String::from(prefix);
-    out.push_str(&lines[0][indent.len()..]);
-    for line in &lines[1..] {
-        out.push('\n');
-        out.push_str(line);
-    }
-    out
-}
-
-pub fn help() -> String {
-    let width = format_width();
-    let action_groups = groups();
-    let max_length = action_groups
-        .iter()
-        .flat_map(|group| group.actions.iter())
-        .map(|action| action.invocation().chars().count() + 2)
-        .max()
-        .unwrap_or(0);
-    let help_position = (max_length + 2).min(24);
-    let action_width = help_position - 4;
-    let help_width = width.saturating_sub(help_position).max(11);
-
-    let mut lines = vec![usage(), String::new()];
-    lines.extend(wrap(DESCRIPTION, width));
-    lines.push(String::new());
-
-    for (index, group) in action_groups.iter().enumerate() {
-        lines.push(format!("{}:", group.title));
-        for action in &group.actions {
-            let invocation = action.invocation();
-            let help_lines = wrap(&action.help, help_width);
-            if help_lines.is_empty() {
-                lines.push(format!("  {invocation}"));
-                continue;
-            }
-            if invocation.chars().count() <= action_width {
-                let padding = " ".repeat(action_width - invocation.chars().count());
-                lines.push(format!("  {invocation}{padding}  {}", help_lines[0]));
-            } else {
-                lines.push(format!("  {invocation}"));
-                lines.push(format!("{}{}", " ".repeat(help_position), help_lines[0]));
-            }
-            for line in &help_lines[1..] {
-                lines.push(format!("{}{}", " ".repeat(help_position), line));
-            }
-        }
-        if index + 1 < action_groups.len() {
-            lines.push(String::new());
-        }
-    }
-
-    lines.join("\n")
-}
-
-/// An integer option value, with argparse's error for anything else.
-fn int<T: FromStr>(flag: &str, raw: &str) -> Result<T, CliError> {
-    raw.parse::<T>().map_err(|_| {
-        CliError::argument(format!(
-            "argument {flag}: invalid int value: {}",
-            quoted(raw)
-        ))
-    })
+        .filter(|v| v.is_finite())
+        .ok_or_else(|| "expected a number of metres".to_string())
 }
 
 /// A comma-separated option value as a set, or None when it names nothing.
@@ -675,180 +250,183 @@ fn list(raw: &str) -> Option<BTreeSet<String>> {
     (!set.is_empty()).then_some(set)
 }
 
+/// Split downloaded runs into walk and run segments and report pace mean + stdev per class.
+#[derive(Debug, Parser)]
+#[command(name = "garmin-analyze", version)]
+struct Cli {
+    /// Directory of downloaded files
+    #[arg(long, value_name = "OUT", default_value = DEFAULT_OUT, help_heading = "Input")]
+    out: PathBuf,
+    /// Route names, one '<activity id> = <name>' per line; any session of a route names it [default: routes.txt in --out]
+    #[arg(long, value_name = "PATH", help_heading = "Input")]
+    route_names: Option<PathBuf>,
+    /// Only activities from this date
+    #[arg(long, value_name = "YYYY-MM-DD", value_parser = parse_date, help_heading = "Input")]
+    start: Option<Date>,
+    /// Only activities up to this date
+    #[arg(long, value_name = "YYYY-MM-DD", value_parser = parse_date, help_heading = "Input")]
+    end: Option<Date>,
+    /// Only the last N days, up to --end or today
+    #[arg(long, value_name = "N", conflicts_with = "start",
+          value_parser = clap::value_parser!(i64).range(1..), help_heading = "Input")]
+    days: Option<i64>,
+    /// Only these comma-separated activity ids
+    #[arg(long = "activity", value_name = "ID", help_heading = "Input")]
+    activity: Option<String>,
+    /// Activity types to analyze: 'all' or comma-separated keys; types come from summary.csv
+    #[arg(long = "type", value_name = "TYPE", default_value = DEFAULT_TYPES, help_heading = "Input")]
+    types: String,
+    /// Worker threads used to parse the files [default: the CPU count, at most 8]; 1 runs single-threaded
+    #[arg(
+        long,
+        value_name = "N",
+        allow_negative_numbers = true,
+        help_heading = "Input"
+    )]
+    jobs: Option<i64>,
+
+    /// How to tell walk from run
+    #[arg(long, value_enum, default_value_t = Method::Hybrid, help_heading = "Classification")]
+    method: Method,
+    /// Strides/min at or above which a segment is a run
+    #[arg(long, value_name = "SPM", default_value_t = DEFAULT_CADENCE_THRESHOLD,
+          help_heading = "Classification")]
+    cadence_threshold: i64,
+    /// Pace cutoff as M:SS or seconds [default: 9:00/km]
+    #[arg(long, value_name = "M:SS", value_parser = parse_pace, help_heading = "Classification")]
+    pace_threshold: Option<i64>,
+
+    /// Seconds of track per segment
+    #[arg(long, value_name = "S", default_value_t = DEFAULT_WINDOW, help_heading = "Segmentation")]
+    window: i64,
+    /// Ignore segments shorter than this many seconds
+    #[arg(long, value_name = "S", default_value_t = DEFAULT_MIN_SEGMENT,
+          help_heading = "Segmentation")]
+    min_segment: i64,
+    /// Ignore segments shorter than this many metres
+    #[arg(long, value_name = "M", default_value_t = DEFAULT_MIN_DISTANCE_M,
+          value_parser = parse_distance, help_heading = "Segmentation")]
+    min_distance: f64,
+    /// A pause longer than this many seconds ends the segment
+    #[arg(long, value_name = "S", default_value_t = DEFAULT_GAP_S, help_heading = "Segmentation")]
+    gap: i64,
+    /// Exclude segments slower than this from the stats, e.g. 15:00 (filters out standing about)
+    #[arg(long, value_name = "M:SS", value_parser = parse_pace, help_heading = "Segmentation")]
+    max_pace: Option<i64>,
+    /// Exclude segments faster than this from the stats, e.g. 3:00 (drops GPS glitches)
+    #[arg(long, value_name = "M:SS", value_parser = parse_pace, help_heading = "Segmentation")]
+    min_pace: Option<i64>,
+
+    /// Passes shorter than this many seconds join a neighbour
+    #[arg(long, value_name = "S", default_value_t = DEFAULT_MIN_PASS_S, help_heading = "Detail")]
+    min_pass: i64,
+    /// Seconds of rolling median applied to cadence
+    #[arg(long, value_name = "S", default_value_t = DEFAULT_SMOOTH_S, help_heading = "Detail")]
+    smooth: i64,
+
+    /// Maximum heart rate, needed for HR zones, TRIMP and pace in zone 3
+    #[arg(long, value_name = "BPM", value_parser = clap::value_parser!(i64).range(100..=250),
+          help_heading = "Metrics")]
+    hr_max: Option<i64>,
+
+    /// Where analysis.csv and segments.csv (passes.csv with --show detail, sessions.csv and weeks.csv with the metric tables) are written
+    #[arg(long, value_name = "DIR", default_value = DEFAULT_REPORT_DIR, help_heading = "Output")]
+    report_dir: PathBuf,
+    /// Also report cadence mean + stdev in strides/min
+    #[arg(long, help_heading = "Output")]
+    cadence_stats: bool,
+    /// Report tables to print: 'all' or comma-separated activities,weekly,overall,detail,summary,progress,zones,fitness,efforts; detail lists every run/walk pass, split on cadence
+    #[arg(long, value_name = "TABLES", value_parser = Tables::parse,
+          default_value = "activities,weekly,overall", help_heading = "Output")]
+    show: Tables,
+    /// Print the report only
+    #[arg(long, help_heading = "Output")]
+    no_csv: bool,
+    /// Serve the HTML report on 127.0.0.1 instead of reporting, with route cards you can rename; names are saved to the --route-names file
+    #[arg(long, help_heading = "Output")]
+    serve: bool,
+    /// Port for --serve
+    #[arg(long, value_name = "N", default_value_t = DEFAULT_PORT,
+          value_parser = clap::value_parser!(u16).range(1..), help_heading = "Output")]
+    port: u16,
+    /// Ask for a name for each route run in the range (default: the last 30 days) and write them to the --route-names file instead of reporting
+    #[arg(long, help_heading = "Output")]
+    name_routes: bool,
+    /// Also write the metrics as one self-contained HTML page with charts, whatever --show picks
+    #[arg(long, value_name = "PATH", help_heading = "Output")]
+    html: Option<PathBuf>,
+    /// Add a satellite map to the HTML report, with a button to turn it off; the page then holds GPS positions and fetches imagery from EOX when opened
+    #[arg(long, help_heading = "Output")]
+    map: bool,
+}
+
+impl Cli {
+    fn into_args(self) -> Args {
+        Args {
+            out: self.out,
+            start: self.start,
+            end: self.end,
+            types: if self.types == "all" {
+                None
+            } else {
+                list(&self.types)
+            },
+            // Under 1 runs single-threaded; clamped before the cast so -3 does not wrap.
+            jobs: self.jobs.map_or_else(default_jobs, |n| n.max(1) as usize),
+            method: self.method,
+            cadence_threshold: self.cadence_threshold,
+            pace_threshold: self.pace_threshold.unwrap_or(DEFAULT_PACE_THRESHOLD),
+            window: self.window,
+            min_segment: self.min_segment,
+            min_distance: self.min_distance,
+            gap: self.gap,
+            // A pace guard of 0 means "not set".
+            max_pace: self.max_pace.filter(|v| *v != 0),
+            min_pace: self.min_pace.filter(|v| *v != 0),
+            report_dir: self.report_dir,
+            cadence_stats: self.cadence_stats,
+            no_csv: self.no_csv,
+            show: self.show,
+            days: self.days,
+            activities: self.activity.as_deref().and_then(list),
+            min_pass: self.min_pass,
+            smooth: self.smooth,
+            hr_max: self.hr_max,
+            html: self.html,
+            map: self.map,
+            route_names: self.route_names,
+            name_routes: self.name_routes,
+            serve: self.serve,
+            port: self.port,
+        }
+    }
+}
+
+pub fn help() -> String {
+    Cli::command().render_help().to_string()
+}
+
 /// Parse argv (without the program name).
 pub fn parse(argv: &[String]) -> Result<Args, CliError> {
     parse_with_today(argv, Date::today())
 }
 
 /// `parse`, with the date `--days` counts back from when there is no `--end`.
-#[allow(clippy::too_many_lines)] // one short match arm per option
 pub fn parse_with_today(argv: &[String], today: Date) -> Result<Args, CliError> {
-    let mut args = Args::default();
-    let mut i = 0;
-
-    while i < argv.len() {
-        let (flag, inline) = match argv[i].split_once('=') {
-            Some((flag, value)) => (flag, Some(value.to_string())),
-            None => (argv[i].as_str(), None),
-        };
-
-        // Flags that take a value: use the inline value when given, otherwise the next argv.
-        let value = |i: &mut usize| -> Result<String, CliError> {
-            if let Some(v) = inline {
-                return Ok(v);
-            }
-            if *i + 1 >= argv.len() {
-                return Err(CliError::argument(format!(
-                    "argument {flag}: expected one argument"
-                )));
-            }
-            *i += 1;
-            Ok(argv[*i].clone())
-        };
-
-        match flag {
-            "-h" | "--help" => {
-                return Err(CliError {
-                    code: 0,
-                    message: help(),
-                    stdout: true,
-                });
-            }
-            "--out" => args.out = PathBuf::from(value(&mut i)?),
-            "--route-names" => args.route_names = Some(PathBuf::from(value(&mut i)?)),
-            "--start" => args.start = Some(parse_date(&value(&mut i)?, "start date")?),
-            "--end" => args.end = Some(parse_date(&value(&mut i)?, "end date")?),
-            "--type" => {
-                let raw = value(&mut i)?;
-                args.types = if raw == "all" { None } else { list(&raw) };
-            }
-            // Under 1 runs single-threaded; clamped before the cast so -3 does not wrap.
-            "--jobs" => args.jobs = int::<i64>(flag, &value(&mut i)?)?.max(1) as usize,
-            "--method" => {
-                let raw = value(&mut i)?;
-                args.method = match raw.as_str() {
-                    "hybrid" => Method::Hybrid,
-                    "cadence" => Method::Cadence,
-                    "pace" => Method::Pace,
-                    "lap" => Method::Lap,
-                    _ => {
-                        return Err(CliError::argument(format!(
-                            "argument --method: invalid choice: {} (choose from {})",
-                            quoted(&raw),
-                            METHODS.join(", ")
-                        )));
-                    }
-                };
-            }
-            "--cadence-threshold" => args.cadence_threshold = int(flag, &value(&mut i)?)?,
-            "--pace-threshold" => {
-                args.pace_threshold = parse_pace(&value(&mut i)?, "pace")?;
-            }
-            "--window" => args.window = int(flag, &value(&mut i)?)?,
-            "--min-segment" => args.min_segment = int(flag, &value(&mut i)?)?,
-            "--min-distance" => {
-                let raw = value(&mut i)?;
-                args.min_distance = raw.parse::<f64>().map_err(|_| {
-                    CliError::argument(format!(
-                        "argument --min-distance: invalid float value: {}",
-                        quoted(&raw)
-                    ))
-                })?;
-                if !args.min_distance.is_finite() {
-                    return Err(CliError::argument(format!(
-                        "argument --min-distance: invalid float value: {}",
-                        quoted(&raw)
-                    )));
-                }
-            }
-            "--gap" => args.gap = int(flag, &value(&mut i)?)?,
-            // Python treats a pace guard of 0 as "not set", so the same is done here.
-            "--max-pace" => {
-                args.max_pace = Some(parse_pace(&value(&mut i)?, "max pace")?).filter(|v| *v != 0);
-            }
-            "--min-pace" => {
-                args.min_pace = Some(parse_pace(&value(&mut i)?, "min pace")?).filter(|v| *v != 0);
-            }
-            "--report-dir" => args.report_dir = PathBuf::from(value(&mut i)?),
-            "--cadence-stats" => args.cadence_stats = true,
-            "--no-csv" => args.no_csv = true,
-            "--name-routes" => args.name_routes = true,
-            "--serve" => args.serve = true,
-            "--port" => {
-                let raw = value(&mut i)?;
-                args.port = raw.parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| {
-                    CliError::argument(format!("argument --port: invalid port: {}", quoted(&raw)))
-                })?;
-            }
-            "--html" => args.html = Some(PathBuf::from(value(&mut i)?)),
-            "--map" => args.map = true,
-            "--show" => {
-                let raw = value(&mut i)?;
-                let mut show = Tables::none();
-                for name in raw.split(',').map(str::trim).filter(|t| !t.is_empty()) {
-                    match name {
-                        "activities" => show.activities = true,
-                        "weekly" => show.weekly = true,
-                        "overall" => show.overall = true,
-                        "detail" => show.detail = true,
-                        "summary" => show.summary = true,
-                        "progress" => show.progress = true,
-                        "zones" => show.zones = true,
-                        "fitness" => show.fitness = true,
-                        "efforts" => show.efforts = true,
-                        "all" => show = Tables::all(),
-                        _ => {
-                            return Err(CliError::argument(format!(
-                                "argument --show: invalid choice: {} (choose from {})",
-                                quoted(name),
-                                SHOW_TABLES.join(", ")
-                            )));
-                        }
-                    }
-                }
-                args.show = show;
-            }
-            "--days" => {
-                let days = int(flag, &value(&mut i)?)?;
-                if days < 1 {
-                    return Err(CliError::argument(format!(
-                        "argument --days: must be at least 1, got {days}"
-                    )));
-                }
-                args.days = Some(days);
-            }
-            "--activity" => args.activities = list(&value(&mut i)?),
-            "--min-pass" => args.min_pass = int(flag, &value(&mut i)?)?,
-            "--smooth" => args.smooth = int(flag, &value(&mut i)?)?,
-            "--hr-max" => {
-                let bpm = int(flag, &value(&mut i)?)?;
-                if !(100..=250).contains(&bpm) {
-                    return Err(CliError::argument(format!(
-                        "argument --hr-max: must be between 100 and 250, got {bpm}"
-                    )));
-                }
-                args.hr_max = Some(bpm);
-            }
-            other => {
-                return Err(CliError::argument(format!(
-                    "unrecognized arguments: {other}"
-                )));
-            }
-        }
-        i += 1;
-    }
+    let cli = Cli::try_parse_from(
+        std::iter::once("garmin-analyze").chain(argv.iter().map(String::as_str)),
+    )?;
+    let mut args = cli.into_args();
 
     if args.map && args.html.is_none() && !args.serve {
-        return Err(CliError::argument(
-            "argument --map: needs --html or --serve",
-        ));
+        return Err(Cli::command()
+            .error(
+                clap::error::ErrorKind::MissingRequiredArgument,
+                "--map needs --html or --serve",
+            )
+            .into());
     }
     if let Some(days) = args.days {
-        if args.start.is_some() {
-            return Err(CliError::argument(
-                "argument --days: not allowed with argument --start",
-            ));
-        }
         args.start = Some(args.end.unwrap_or(today).minus_days(days - 1));
     }
     if args.name_routes && args.start.is_none() {

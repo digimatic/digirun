@@ -102,9 +102,9 @@ fn show_picks_the_report_tables() {
 
     let error = parse(&argv(&["--show", "week"])).expect_err("week is not a table");
     assert_eq!(error.code, 2);
-    assert!(error.message.contains("invalid choice: 'week'"));
-    assert!(help().contains("--show TABLES"));
-    assert!(help().contains("--days N"));
+    assert!(error.message.contains("invalid choice 'week'"));
+    assert!(help().contains("--show <TABLES>"));
+    assert!(help().contains("--days <N>"));
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn metric_options_parse() {
             .code,
         2
     );
-    assert!(help().contains("--hr-max BPM"));
+    assert!(help().contains("--hr-max <BPM>"));
 }
 
 #[test]
