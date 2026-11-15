@@ -2,8 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::analyze::stats;
-use crate::analyze::{RUN, WALK};
 use crate::args::{AMBIGUOUS_CADENCE, Args, Method};
 use crate::dt::Date;
 use crate::format::{change, duration_or_dash, fmt_duration, fmt_pace, py_num};
@@ -15,6 +13,8 @@ use crate::metrics::{
 use crate::model::{Activity, Segment, Stats};
 use crate::num::{mean_of, round_int};
 use crate::passes::{Pass, Source, totals};
+use crate::segments::stats;
+use crate::segments::{RUN, WALK};
 
 /// Right-aligned cell, or `-` when the value is missing.
 fn cell(value: Option<f64>) -> String {

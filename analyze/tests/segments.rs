@@ -4,14 +4,14 @@ mod common;
 
 use std::collections::BTreeSet;
 
-use garmin_analyze::analyze::{
-    build_segments, classify, filter_activities, filter_segments, in_range, stats,
-};
 use garmin_analyze::args::{Args, Method};
 use garmin_analyze::csvout::write_csvs;
 use garmin_analyze::dt::Date;
 use garmin_analyze::model::{Activity, Segment};
 use garmin_analyze::num::round;
+use garmin_analyze::segments::{
+    build_segments, classify, filter_activities, filter_segments, in_range, stats,
+};
 
 use common::*;
 

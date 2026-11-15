@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::analyze::stats;
 use crate::args::Args;
 use crate::csv::Writer;
 use crate::format::py_num;
@@ -11,6 +10,7 @@ use crate::metrics::{Metrics, sessions_in_range};
 use crate::model::{Activity, Segment};
 use crate::num::round;
 use crate::passes::Pass;
+use crate::segments::stats;
 
 pub const ANALYSIS_FIELDS: [&str; 13] = [
     "date",

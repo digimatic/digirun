@@ -12,7 +12,6 @@ use std::path::Path;
 
 mod chart;
 
-use crate::analyze::{RUN, WALK};
 use crate::args::Args;
 use crate::dt::Date;
 use crate::format::{change, duration_or_dash, fmt_duration, fmt_pace};
@@ -24,6 +23,7 @@ use crate::metrics::{
 };
 use crate::num::mean_of;
 use crate::passes::{Pass, build_passes};
+use crate::segments::{RUN, WALK};
 use chart::{BarChart, PACE, Point, Series, TWO_DECIMALS, WHOLE, bar_chart, line_chart};
 
 const CSS: &str = include_str!("../report.css");

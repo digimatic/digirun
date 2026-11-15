@@ -6,12 +6,12 @@
 
 use std::collections::BTreeMap;
 
-use crate::analyze::RUN;
 use crate::html::esc;
 use crate::metrics::{Session, typical_gain};
 use crate::model::{Activity, Point};
 use crate::num::upper_median;
 use crate::passes::Pass;
+use crate::segments::RUN;
 
 const METRES_PER_DEGREE: f64 = 111_320.0;
 /// A point closer than this to the last one drawn adds nothing but bytes.

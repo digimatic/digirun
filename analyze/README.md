@@ -321,7 +321,7 @@ local `Host`.
 | `src/parse.rs` | `read_gpx` / `read_tcx` |
 | `src/xml.rs` | small namespace-agnostic DOM |
 | `src/model.rs` | `Point`, `Activity`, `Segment`, haversine |
-| `src/analyze.rs` | classification, segmentation, stats, filters |
+| `src/segments.rs` | classification, segmentation, stats, filters |
 | `src/passes.rs` | the detail table: cadence-split passes and their stats |
 | `src/metrics.rs` | session and week metrics: load, zones, fitness, efforts |
 | `src/routes.rs` | grouping tracks into routes, describing them, applying `routes.txt` |

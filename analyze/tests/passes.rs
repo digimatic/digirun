@@ -2,9 +2,9 @@
 
 mod common;
 
-use garmin_analyze::analyze::build_segments;
 use garmin_analyze::args::Args;
 use garmin_analyze::passes::{Source, build_passes, climbs};
+use garmin_analyze::segments::build_segments;
 
 use common::*;
 

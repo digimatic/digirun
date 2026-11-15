@@ -8,7 +8,6 @@
 //! Classification is threshold-based: pace is derived from position deltas (GPX has
 //! no speed field), cadence comes from the trackpoint extensions when present.
 
-pub mod analyze;
 pub mod args;
 pub mod csv;
 pub mod csvout;
@@ -25,6 +24,7 @@ pub mod parse;
 pub mod passes;
 pub mod report;
 pub mod routes;
+pub mod segments;
 pub mod serve;
 pub mod xml;
 
@@ -76,7 +76,7 @@ fn try_run(args: &Args) -> Result<i32, String> {
     let loaded_ids: BTreeSet<&str> = activities.iter().map(|a| a.activity_id.as_str()).collect();
 
     let refs: Vec<&Activity> = activities.iter().collect();
-    let (kept, type_skipped, type_unknown) = analyze::filter_activities(&refs, &args.types);
+    let (kept, type_skipped, type_unknown) = segments::filter_activities(&refs, &args.types);
     if kept.is_empty() {
         println!(
             "No activities left after the --type filter ({type_skipped} skipped, {type_unknown} unknown)."
@@ -123,7 +123,7 @@ fn try_run(args: &Args) -> Result<i32, String> {
     let mut kept_segments: Vec<&Segment> = Vec::new();
     if args.show.segments() {
         (kept_segments, dropped.slow_segments, dropped.fast_segments) =
-            analyze::filter_segments(&seg_refs, args);
+            segments::filter_segments(&seg_refs, args);
         if kept_segments.is_empty() {
             println!("No segments matched — try a smaller --window or a wider date range.");
             if !args.show.detail && args.html.is_none() {
@@ -135,7 +135,7 @@ fn try_run(args: &Args) -> Result<i32, String> {
     let detail: Vec<(&Activity, Vec<passes::Pass>)> = if args.show.detail {
         kept.iter()
             .copied()
-            .filter(|a| analyze::in_range(a, args))
+            .filter(|a| segments::in_range(a, args))
             .map(|a| (a, passes::build_passes(a, args)))
             .collect()
     } else {
@@ -350,13 +350,13 @@ fn apply_route_names(
 fn collect_segments(activities: &[&Activity], args: &Args) -> Vec<Segment> {
     let mut segments: Vec<Segment> = Vec::new();
     for activity in activities {
-        if !analyze::in_range(activity, args) {
+        if !segments::in_range(activity, args) {
             continue;
         }
         if args.method == Method::Lap {
-            segments.extend(analyze::lap_segments(activity, args));
+            segments.extend(segments::lap_segments(activity, args));
         } else {
-            segments.extend(analyze::build_segments(activity, args));
+            segments.extend(segments::build_segments(activity, args));
         }
     }
     segments

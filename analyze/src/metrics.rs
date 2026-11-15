@@ -6,13 +6,13 @@
 
 use std::collections::BTreeSet;
 
-use crate::analyze::{RUN, WALK, in_range};
 use crate::args::Args;
 use crate::dt::Date;
 use crate::model::Activity;
 use crate::num::{median, upper_median};
 use crate::passes::{Pass, Step, build_passes, offsets, smoothed_altitude, steps, totals};
 use crate::routes::{NO_ROUTE, assign_routes, describe_route, route_cells};
+use crate::segments::{RUN, WALK, in_range};
 
 pub const ZONES: usize = 5;
 pub const EFFORT_DISTANCES_M: [f64; 3] = [1000.0, 3000.0, 5000.0];
