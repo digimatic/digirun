@@ -252,7 +252,8 @@ fn list(raw: &str) -> Option<BTreeSet<String>> {
 
 /// Split downloaded runs into walk and run segments and report pace mean + stdev per class.
 #[derive(Debug, Parser)]
-#[command(name = "garmin-analyze", version)]
+// A repeated option keeps its last value, as argparse did, so an alias can be overridden.
+#[command(name = "garmin-analyze", version, args_override_self = true)]
 struct Cli {
     /// Directory of downloaded files
     #[arg(long, value_name = "OUT", default_value = DEFAULT_OUT, help_heading = "Input")]

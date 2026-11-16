@@ -192,3 +192,19 @@ fn jobs_under_one_runs_single_threaded() {
         assert_eq!(args.jobs, 1, "--jobs {value}");
     }
 }
+
+#[test]
+fn a_repeated_option_keeps_the_last_value() {
+    let argv = [
+        "--out",
+        "./a",
+        "--out",
+        "./b",
+        "--cadence-stats",
+        "--cadence-stats",
+    ]
+    .map(str::to_string);
+    let args = parse(&argv).expect("a repeated option should parse");
+    assert_eq!(args.out, PathBuf::from("./b"));
+    assert!(args.cadence_stats);
+}
