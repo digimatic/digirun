@@ -102,9 +102,9 @@ fn show_picks_the_report_tables() {
 
     let error = parse(&argv(&["--show", "week"])).expect_err("week is not a table");
     assert_eq!(error.code, 2);
-    assert!(error.message.contains("invalid choice: 'week'"));
-    assert!(help().contains("--show TABLES"));
-    assert!(help().contains("--days N"));
+    assert!(error.message.contains("invalid choice 'week'"));
+    assert!(help().contains("--show <TABLES>"));
+    assert!(help().contains("--days <N>"));
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn metric_options_parse() {
             .code,
         2
     );
-    assert!(help().contains("--hr-max BPM"));
+    assert!(help().contains("--hr-max <BPM>"));
 }
 
 #[test]
@@ -191,4 +191,20 @@ fn jobs_under_one_runs_single_threaded() {
         let args = parse(&["--jobs".to_string(), value.to_string()]).unwrap();
         assert_eq!(args.jobs, 1, "--jobs {value}");
     }
+}
+
+#[test]
+fn a_repeated_option_keeps_the_last_value() {
+    let argv = [
+        "--out",
+        "./a",
+        "--out",
+        "./b",
+        "--cadence-stats",
+        "--cadence-stats",
+    ]
+    .map(str::to_string);
+    let args = parse(&argv).expect("a repeated option should parse");
+    assert_eq!(args.out, PathBuf::from("./b"));
+    assert!(args.cadence_stats);
 }

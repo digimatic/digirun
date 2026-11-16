@@ -309,17 +309,16 @@ local `Host`.
   the segment paces.
 - A file that fails to parse is reported on stderr and skipped, so one corrupt
   file does not take down the report.
-- Numbers, CSVs (CRLF, minimal quoting) and `--help` are formatted the way
-  Python's `str(float)`, `csv` module and argparse do. Help wraps at `$COLUMNS`
-  when it is set and otherwise at 80 columns.
-- Exit codes: 0 for help, 1 for program errors such as a bad pace or a missing
-  directory, 2 for argument errors.
+- Numbers and CSVs (CRLF, minimal quoting) are formatted the way Python's
+  `str(float)` and `csv` module do. Options are parsed with clap.
+- Exit codes: 0 for help, 1 for program errors such as a missing
+  directory, 2 for argument errors such as a bad pace.
 
 ## Layout
 
 | File | Contents |
 | --- | --- |
-| `src/args.rs` | argument parsing, defaults, argparse-style help and errors |
+| `src/args.rs` | argument parsing (clap) and defaults |
 | `src/load.rs` | grouping the files per activity, reading `summary.csv`, the worker pool |
 | `src/parse.rs` | `read_gpx` / `read_tcx` |
 | `src/xml.rs` | small namespace-agnostic DOM |
